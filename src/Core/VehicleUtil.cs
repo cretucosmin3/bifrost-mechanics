@@ -7,6 +7,7 @@ namespace Valhicle.Core
     {
         public const string ParentZdoKey = "Valhicle_Parent";
         public const string BearingZdoKey = "Valhicle_Bearing";
+        public const string SuspensionZdoKey = "Valhicle_Suspension";
         public const string LocalPosZdoKey = "Valhicle_LocalPos";
         public const string LocalRotZdoKey = "Valhicle_LocalRot";
         public const string DockedZdoKey = "Valhicle_Docked";

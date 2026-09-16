@@ -35,6 +35,9 @@ namespace Valhicle.Core
             var bearing = hit.collider.GetComponentInParent<VehicleBearing>();
             bool hubAim = bearing != null && bearing.IsHubTarget(hit.point, hit.collider);
 
+            var suspension = hit.collider.GetComponentInParent<VehicleSuspension>();
+            bool suspAim = suspension != null;
+
             bool isWheel = ghost.GetComponent<VehicleWheel>() != null;
             bool isBearing = ghost.GetComponent<VehicleBearing>() != null;
             bool isSuspension = ghost.GetComponent<VehicleSuspension>() != null;
@@ -42,6 +45,10 @@ namespace Valhicle.Core
             if (isWheel && hubAim)
             {
                 ApplyWheelOnBearing(ghost.transform, bearing, twist);
+            }
+            else if (isWheel && suspAim)
+            {
+                ApplyWheelOnSuspension(ghost.transform, suspension, twist);
             }
             else if (isWheel)
             {
@@ -75,6 +82,26 @@ namespace Valhicle.Core
             ApplyWheelOnBearing(wheel, bearing, 0f);
         }
 
+        public static void SnapWheelToSuspension(Transform wheel, VehicleSuspension suspension)
+        {
+            if (wheel == null || suspension == null) return;
+            Transform head = suspension.MovingHead != null ? suspension.MovingHead : suspension.transform;
+            VehicleUtil.ParentKeepWorld(wheel, head, true);
+            ApplyWheelOnSuspension(wheel, suspension, 0f);
+        }
+
+        private static void ApplyWheelOnSuspension(Transform wheel, VehicleSuspension suspension, float twist)
+        {
+            Transform head = suspension.MovingHead != null ? suspension.MovingHead : suspension.transform;
+            var core = suspension.GetComponentInParent<VehicleCore>();
+            Vector3 refRight = core != null ? core.transform.right : suspension.transform.right;
+            Vector3 axle = Quaternion.AngleAxis(twist, suspension.transform.up) * refRight;
+
+            wheel.rotation = RotationWithRight(axle, 0f);
+            float topOffset = suspension.RestLength * 0.42f;
+            wheel.position = suspension.transform.position + suspension.transform.up * topOffset;
+        }
+
         private static void ApplyBearingOnSurface(Transform t, Vector3 point, Vector3 normal, float twist)
         {
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
@@ -87,8 +114,10 @@ namespace Valhicle.Core
         private static void ApplyStrutOnSurface(Transform t, Vector3 point, Vector3 normal, float twist)
         {
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
+            var susp = t.GetComponent<VehicleSuspension>();
+            float halfHeight = (susp != null ? susp.RestLength : 0.70f) * 0.42f + 0.02f;
             t.rotation = Quaternion.AngleAxis(twist, n) * RotationWithUp(n, 0f);
-            t.position = point + n * 0.05f;
+            t.position = point + n * halfHeight;
             t.localScale = Vector3.one;
         }
 

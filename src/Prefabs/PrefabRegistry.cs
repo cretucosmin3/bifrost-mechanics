@@ -595,48 +595,165 @@ namespace Valhicle.Prefabs
             visual.transform.localPosition = rot * Vector3.Scale(-b.center, visual.transform.localScale);
         }
 
+        private static void OrientAndScaleSpring(GameObject visual, float desiredLength, float desiredDiameter)
+        {
+            var mf = visual.GetComponentInChildren<MeshFilter>(true);
+            if (mf == null || mf.sharedMesh == null)
+            {
+                visual.transform.localRotation = Quaternion.identity;
+                visual.transform.localScale = new Vector3(desiredDiameter, desiredLength * 0.5f, desiredDiameter);
+                visual.transform.localPosition = Vector3.zero;
+                return;
+            }
+
+            var b = mf.sharedMesh.bounds;
+            Vector3 size = b.size;
+
+            // Determine which axis corresponds to the helical coil axis.
+            int coilAxis = 1; // Default Y
+            float dX = Mathf.Abs(size.y - size.z);
+            float dY = Mathf.Abs(size.x - size.z);
+            float dZ = Mathf.Abs(size.x - size.y);
+
+            if (size.x > size.y * 1.15f && size.x > size.z * 1.15f) coilAxis = 0;
+            else if (size.y > size.x * 1.15f && size.y > size.z * 1.15f) coilAxis = 1;
+            else if (size.z > size.x * 1.15f && size.z > size.y * 1.15f) coilAxis = 2;
+            else if (size.x < size.y * 0.85f && size.x < size.z * 0.85f) coilAxis = 0;
+            else if (size.y < size.x * 0.85f && size.y < size.z * 0.85f) coilAxis = 1;
+            else if (size.z < size.x * 0.85f && size.z < size.y * 0.85f) coilAxis = 2;
+            else if (dX <= dY && dX <= dZ) coilAxis = 0;
+            else if (dZ <= dX && dZ <= dY) coilAxis = 2;
+            else coilAxis = 1;
+
+            Quaternion rot;
+            float meshLength;
+            float meshDiameter;
+
+            if (coilAxis == 0) // X -> Y
+            {
+                rot = Quaternion.Euler(0f, 0f, 90f);
+                meshLength = size.x;
+                meshDiameter = Mathf.Max(size.y, size.z);
+            }
+            else if (coilAxis == 2) // Z -> Y
+            {
+                rot = Quaternion.Euler(90f, 0f, 0f);
+                meshLength = size.z;
+                meshDiameter = Mathf.Max(size.x, size.y);
+            }
+            else // Y -> Y
+            {
+                rot = Quaternion.identity;
+                meshLength = size.y;
+                meshDiameter = Mathf.Max(size.x, size.z);
+            }
+
+            float lengthScale = desiredLength / Mathf.Max(0.01f, meshLength);
+            float diamScale = desiredDiameter / Mathf.Max(0.01f, meshDiameter);
+
+            Vector3 baseScale;
+            if (coilAxis == 0)
+                baseScale = new Vector3(lengthScale, diamScale, diamScale);
+            else if (coilAxis == 2)
+                baseScale = new Vector3(diamScale, diamScale, lengthScale);
+            else
+                baseScale = new Vector3(diamScale, lengthScale, diamScale);
+
+            visual.transform.localRotation = rot;
+            visual.transform.localScale = baseScale;
+            visual.transform.localPosition = rot * -Vector3.Scale(b.center, baseScale);
+        }
+
         private static void CreateSuspensionPrefab(GameObject springSource, SuspensionType type, string name, string label, Piece.Requirement[] reqs)
         {
             var obj = CreateEmptyPieceObject(name, label,
-                $"Coiled metal suspension strut ({type}). Snaps between chassis and wheel.", reqs);
+                $"Coiled metal suspension strut ({type}). Snaps between structures. [E] configure force, [Shift+E] mode.", reqs);
 
             float height = type == SuspensionType.Standard ? 0.70f : 0.90f;
+            float span = height * 0.84f - 0.04f;
+            float springDiameter = type == SuspensionType.Standard ? 0.14f : 0.17f;
+
             var col = obj.AddComponent<BoxCollider>();
-            col.size = new Vector3(0.22f, height, 0.22f);
+            col.size = new Vector3(0.24f, height, 0.24f);
 
-            var topBracket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            topBracket.name = "TopBracket";
-            topBracket.transform.SetParent(obj.transform, false);
-            topBracket.transform.localPosition = new Vector3(0f, height * 0.42f, 0f);
-            topBracket.transform.localScale = new Vector3(0.18f, 0.04f, 0.18f);
-            var colTop = topBracket.GetComponent<Collider>();
-            if (colTop != null) UnityEngine.Object.DestroyImmediate(colTop);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(topBracket, _woodMaterial);
-
+            // 1. Static base bracket
             var botBracket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             botBracket.name = "BottomBracket";
             botBracket.transform.SetParent(obj.transform, false);
             botBracket.transform.localPosition = new Vector3(0f, -height * 0.42f, 0f);
-            botBracket.transform.localScale = new Vector3(0.18f, 0.04f, 0.18f);
+            botBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
             var colBot = botBracket.GetComponent<Collider>();
             if (colBot != null) UnityEngine.Object.DestroyImmediate(colBot);
             if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(botBracket, _woodMaterial);
 
-            float springScale = type == SuspensionType.Standard ? 0.55f : 0.75f;
-            var springVisual = CreateVisualMeshChild(springSource, obj.transform, Vector3.zero, Quaternion.identity, new Vector3(springScale, height * 0.7f, springScale));
-            springVisual.name = "SpringMeshVisual";
+            // 1b. Lower damper cylinder (guide tube)
+            var damperTube = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            damperTube.name = "BaseDamperTube";
+            damperTube.transform.SetParent(obj.transform, false);
+            damperTube.transform.localPosition = new Vector3(0f, -height * 0.15f, 0f);
+            damperTube.transform.localScale = new Vector3(0.06f, height * 0.25f, 0.06f);
+            var colDamper = damperTube.GetComponent<Collider>();
+            if (colDamper != null) UnityEngine.Object.DestroyImmediate(colDamper);
+            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(damperTube, _woodMaterial);
 
+            // 2. Moving Head (holds top bracket, piston rod, and snapped child loads)
+            var movingHead = new GameObject("MovingHead");
+            movingHead.transform.SetParent(obj.transform, false);
+            movingHead.transform.localPosition = Vector3.zero;
+            movingHead.transform.localRotation = Quaternion.identity;
+            movingHead.transform.localScale = Vector3.one;
+
+            var topBracket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            topBracket.name = "TopBracket";
+            topBracket.transform.SetParent(movingHead.transform, false);
+            topBracket.transform.localPosition = new Vector3(0f, height * 0.42f, 0f);
+            topBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
+            var colTop = topBracket.GetComponent<Collider>();
+            if (colTop != null) UnityEngine.Object.DestroyImmediate(colTop);
+            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(topBracket, _woodMaterial);
+
+            // 2b. Upper piston rod that slides into the lower damper tube
+            var pistonRod = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            pistonRod.name = "PistonRod";
+            pistonRod.transform.SetParent(movingHead.transform, false);
+            pistonRod.transform.localPosition = new Vector3(0f, height * 0.15f, 0f);
+            pistonRod.transform.localScale = new Vector3(0.038f, height * 0.25f, 0.038f);
+            var colPiston = pistonRod.GetComponent<Collider>();
+            if (colPiston != null) UnityEngine.Object.DestroyImmediate(colPiston);
+            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(pistonRod, _woodMaterial);
+
+            // 3. Spring Container & Mesh
+            var springContainer = new GameObject("SpringContainer");
+            springContainer.transform.SetParent(obj.transform, false);
+            springContainer.transform.localPosition = Vector3.zero;
+            springContainer.transform.localRotation = Quaternion.identity;
+            springContainer.transform.localScale = Vector3.one;
+
+            var springVisual = CreateVisualMeshChild(springSource, springContainer.transform, Vector3.zero, Quaternion.identity, Vector3.one);
+            springVisual.name = "SpringMeshVisual";
+            OrientAndScaleSpring(springVisual, span, springDiameter);
+
+            // 4. VehicleSuspension Component
             var susp = obj.AddComponent<VehicleSuspension>();
             susp.Type = type;
+            susp.MovingHead = movingHead.transform;
+            susp.SpringContainer = springContainer.transform;
             susp.SpringMeshTransform = springVisual.transform;
+            susp.PistonRod = pistonRod.transform;
+            susp.BaseDamperTube = damperTube.transform;
+            susp.TopBracket = topBracket.transform;
+            susp.BottomBracket = botBracket.transform;
             susp.OriginalSpringScale = springVisual.transform.localScale;
+            susp.RestLength = height * 0.84f;
+            susp.SpringForce = type == SuspensionType.Standard ? 2500f : 5000f;
             susp.ApplySuspensionSettings();
 
+            // 5. VehiclePiece & Snap Points
             obj.AddComponent<VehiclePiece>();
-            VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, height * 0.5f, 0f));
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, -height * 0.5f, 0f));
+            VehicleUtil.AddSnapPoint(movingHead.transform, new Vector3(0f, height * 0.5f, 0f));
 
-            FinishPieceRoot(obj, false, label, $"Coiled metal suspension strut ({type}).", reqs, 160f);
+            FinishPieceRoot(obj, false, label, $"Coiled metal suspension strut ({type}). [E] set force, [Shift+E] mode.", reqs, 160f);
             RegisterPrefab(obj, isPiece: true);
         }
 

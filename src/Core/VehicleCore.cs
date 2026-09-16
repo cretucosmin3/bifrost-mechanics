@@ -318,6 +318,11 @@ namespace Valhicle.Core
                 if (Bearings[i] != null) Bearings[i].SyncZdo();
             }
 
+            for (int i = 0; i < Suspensions.Count; i++)
+            {
+                if (Suspensions[i] != null) Suspensions[i].SyncZdo();
+            }
+
             for (int i = 0; i < Pieces.Count; i++)
             {
                 if (Pieces[i] != null) Pieces[i].SyncWorldZdo();

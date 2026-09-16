@@ -33,16 +33,22 @@ namespace Valhicle.Patches
 
             var vp = placed.GetComponent<VehiclePiece>() ?? placed.gameObject.AddComponent<VehiclePiece>();
             VehicleBearing targetBearing = null;
+            VehicleSuspension targetSuspension = null;
             if (LastHitCollider != null && Time.time - LastHitTime < 4.0f)
             {
                 targetBearing = LastHitCollider.GetComponentInParent<VehicleBearing>();
-                if (targetBearing == null)
+                targetSuspension = LastHitCollider.GetComponentInParent<VehicleSuspension>();
+                if (targetBearing == null && targetSuspension == null)
                 {
                     var hitPiece = LastHitCollider.GetComponentInParent<VehiclePiece>();
-                    if (hitPiece != null) targetBearing = hitPiece.AttachedBearing;
+                    if (hitPiece != null)
+                    {
+                        targetBearing = hitPiece.AttachedBearing;
+                        targetSuspension = hitPiece.AttachedSuspension;
+                    }
                 }
             }
-            vp.OnPlaced(targetBearing);
+            vp.OnPlaced(targetBearing, targetSuspension);
         }
 
         private static Piece FindPlacedInstance(Piece prefab, Vector3 pos)
@@ -154,6 +160,7 @@ namespace Valhicle.Patches
             return col.GetComponentInParent<VehicleLift>() != null
                 || col.GetComponentInParent<VehicleCore>() != null
                 || col.GetComponentInParent<VehicleBearing>() != null
+                || col.GetComponentInParent<VehicleSuspension>() != null
                 || col.GetComponentInParent<VehiclePiece>() != null;
         }
     }
