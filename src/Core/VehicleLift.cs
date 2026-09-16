@@ -63,10 +63,74 @@ namespace Valhicle.Core
         public void EnterBuildMode()
         {
             if (Core == null) Core = GetComponent<VehicleCore>() ?? gameObject.AddComponent<VehicleCore>();
+            UprightVehicle();
             Core.DockOnLift(this, transform);
             if (_nview != null && _nview.IsValid() && _nview.IsOwner())
             {
                 _nview.GetZDO().Set(BuildModeZdoKey, true);
+            }
+        }
+
+        public void UprightVehicle()
+        {
+            if (Core == null) Core = GetComponent<VehicleCore>();
+
+            // 1. Calculate upright rotation preserving horizontal yaw (zero pitch and roll)
+            Vector3 fwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (fwd.sqrMagnitude < 0.001f)
+            {
+                fwd = Vector3.ProjectOnPlane(-transform.up, Vector3.up);
+                if (fwd.sqrMagnitude < 0.001f)
+                    fwd = Vector3.ProjectOnPlane(transform.right, Vector3.up);
+                if (fwd.sqrMagnitude < 0.001f)
+                    fwd = Vector3.forward;
+            }
+            transform.rotation = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+
+            // 2. Clear physics velocities so it doesn't carry residual momentum
+            if (Core != null && Core.Rb != null)
+            {
+                Core.Rb.linearVelocity = Vector3.zero;
+                Core.Rb.angularVelocity = Vector3.zero;
+            }
+
+            Physics.SyncTransforms();
+
+            // 3. Resample ground below the vehicle
+            SampleGround(force: true);
+
+            // 4. Calculate bottom-most extent of vehicle colliders
+            float lowestY = transform.position.y;
+            var colliders = GetComponentsInChildren<Collider>(false);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                var col = colliders[i];
+                if (col == null || col.isTrigger) continue;
+                if (col.bounds.min.y < lowestY)
+                {
+                    lowestY = col.bounds.min.y;
+                }
+            }
+
+            float bottomDrop = transform.position.y - lowestY;
+            if (bottomDrop < 0f) bottomDrop = 0f;
+
+            // Ensure the lowest part is safely above ground
+            float currentHeight = transform.position.y - _groundY;
+            float safeHeight = bottomDrop + 0.35f;
+            float targetHeight = Mathf.Clamp(Mathf.Max(currentHeight, safeHeight), MinHeight, MaxHeight);
+
+            Vector3 p = transform.position;
+            p.y = _groundY + targetHeight;
+            transform.position = p;
+
+            Physics.SyncTransforms();
+            VehicleUtil.ForceWorldScaleOne(transform);
+
+            if (_nview != null && _nview.IsValid() && _nview.IsOwner())
+            {
+                _nview.GetZDO().Set(HeightZdoKey, targetHeight);
+                _nview.GetZDO().Set(GroundYZdoKey, _groundY);
             }
         }
 
@@ -111,13 +175,21 @@ namespace Valhicle.Core
         {
             if (_groundSampled && !force) return;
             _groundY = transform.position.y;
-            int mask = LayerMask.GetMask("Default", "static_solid", "terrain");
-            if (Physics.Raycast(transform.position + Vector3.up * 4f, Vector3.down, out var hit, 16f, mask, QueryTriggerInteraction.Ignore))
+            int mask = LayerMask.GetMask("Default", "static_solid", "terrain", "piece");
+            var hits = Physics.RaycastAll(transform.position + Vector3.up * 8f, Vector3.down, 32f, mask, QueryTriggerInteraction.Ignore);
+            float highestGround = -10000f;
+            for (int i = 0; i < hits.Length; i++)
             {
-                if (!VehicleUtil.BelongsToVehicle(hit.collider, Core))
+                if (VehicleUtil.BelongsToVehicle(hits[i].collider, Core)) continue;
+                if (hits[i].collider.isTrigger) continue;
+                if (hits[i].point.y > highestGround)
                 {
-                    _groundY = hit.point.y;
+                    highestGround = hits[i].point.y;
                 }
+            }
+            if (highestGround > -9000f)
+            {
+                _groundY = highestGround;
             }
             _groundSampled = true;
         }
@@ -181,7 +253,7 @@ namespace Valhicle.Core
             else
             {
                 EnterBuildMode();
-                player.Message(MessageHud.MessageType.Center, "Platform frozen. Up/Down arrows raise and lower it.");
+                player.Message(MessageHud.MessageType.Center, "Platform frozen & uprighted. Up/Down arrows raise and lower it.");
             }
             return true;
         }

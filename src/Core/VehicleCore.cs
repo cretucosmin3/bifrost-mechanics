@@ -271,15 +271,6 @@ namespace Valhicle.Core
                 totalCompression += wheel.Compression;
             }
 
-            float avgCompression = Wheels.Count > 0 ? totalCompression / Wheels.Count : 0f;
-            for (int i = 0; i < Suspensions.Count; i++)
-            {
-                if (Suspensions[i] != null)
-                {
-                    Suspensions[i].UpdateVisuals(avgCompression);
-                }
-            }
-
             ApplyAntiRoll();
 
             if (Rb.linearVelocity.magnitude > MaxSpeed)

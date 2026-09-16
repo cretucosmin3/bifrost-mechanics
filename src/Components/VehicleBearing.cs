@@ -28,11 +28,17 @@ namespace Valhicle.Components
 
         private ZNetView _nview;
         private float _omega;
+        private float _externalTorque;
         private float _reclaimTimer;
         private float _arrowHoldTimer;
         private float _arrowRepeatTimer;
         private Vector3 _lastVehicleVel;
         private readonly List<Load> _loads = new List<Load>();
+
+        public void AddTorque(float torque)
+        {
+            _externalTorque += torque;
+        }
 
         private struct Load
         {
@@ -96,6 +102,12 @@ namespace Valhicle.Components
             if (t == transform || t == RotatingHead) return true;
             if (transform.IsChildOf(t) || t == transform.parent) return true;
             if (t.GetComponent<VehicleCore>() != null || t.GetComponent<VehicleLift>() != null) return true;
+            if (Owns(t)) return false;
+
+            // Any piece physically behind the mount plate is on the chassis/support side
+            Vector3 localPos = transform.InverseTransformPoint(t.position);
+            if (localPos.y < -0.05f) return true;
+
             return false;
         }
 
@@ -270,7 +282,8 @@ namespace Valhicle.Components
                 _lastVehicleVel = v;
             }
 
-            float totalTorque = 0f;
+            float totalTorque = _externalTorque;
+            _externalTorque = 0f;
             float totalInertia = 0.8f;
 
             for (int i = 0; i < _loads.Count; i++)
@@ -341,6 +354,13 @@ namespace Valhicle.Components
                 var nv = p.GetComponent<ZNetView>();
                 if (nv == null || !nv.IsValid()) continue;
                 if (nv.GetZDO().GetZDOID(VehicleUtil.BearingZdoKey) != myId) continue;
+
+                if (IsMountSupport(p.transform))
+                {
+                    if (nv.IsOwner()) nv.GetZDO().Set(VehicleUtil.BearingZdoKey, ZDOID.None);
+                    continue;
+                }
+
                 RegisterAttachment(p.transform);
             }
         }
@@ -349,10 +369,20 @@ namespace Valhicle.Components
 
         public bool IsHubTarget(Vector3 worldPoint, Collider hitCol)
         {
-            if (hitCol == null) return Vector3.Distance(worldPoint, transform.position) < 0.5f;
+            if (hitCol == null) return false;
             var b = hitCol.GetComponentInParent<VehicleBearing>();
             if (b != this) return false;
-            return Vector3.Distance(worldPoint, transform.position) < 0.5f;
+
+            // Must be the bearing piece itself, NOT another piece attached to the bearing!
+            var piece = hitCol.GetComponentInParent<Piece>();
+            if (piece != null && piece.gameObject != gameObject) return false;
+
+            Vector3 toPoint = worldPoint - transform.position;
+            float projUp = Vector3.Dot(toPoint, transform.up);
+            if (projUp < -0.02f) return false; // Behind mount plate
+
+            Vector3 radial = toPoint - transform.up * projUp;
+            return radial.magnitude <= 0.22f;
         }
 
         private void Update()

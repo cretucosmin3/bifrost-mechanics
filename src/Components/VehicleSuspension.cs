@@ -58,7 +58,8 @@ namespace Valhicle.Components
         private float _headVelocity;
         private readonly List<Load> _loads = new List<Load>();
 
-        // Optional connection to an external structure/Rigidbody
+        // Optional connection to an external structure/Rigidbody or Bearing
+        private VehicleBearing _bearingTarget;
         private Rigidbody _externalTargetRb;
         private Transform _externalTargetTransform;
         private Vector3 _externalTargetLocalAnchor;
@@ -132,7 +133,29 @@ namespace Valhicle.Components
             if (t == transform || t == MovingHead) return true;
             if (transform.IsChildOf(t) || t == transform.parent) return true;
             if (t.GetComponent<VehicleCore>() != null || t.GetComponent<VehicleLift>() != null) return true;
+            if (Owns(t)) return false;
+
+            Vector3 localPos = transform.InverseTransformPoint(t.position);
+            if (localPos.y < -RestLength * 0.35f) return true;
+
             return false;
+        }
+
+        public bool IsHeadTarget(Vector3 worldPoint, Collider hitCol)
+        {
+            if (hitCol == null) return false;
+            var s = hitCol.GetComponentInParent<VehicleSuspension>();
+            if (s != this) return false;
+
+            var piece = hitCol.GetComponentInParent<Piece>();
+            if (piece != null && piece.gameObject != gameObject) return false;
+
+            Vector3 toPoint = worldPoint - transform.position;
+            float projUp = Vector3.Dot(toPoint, transform.up);
+            if (projUp < RestLength * 0.15f) return false; // Lower half or base bracket
+
+            Vector3 radial = toPoint - transform.up * projUp;
+            return radial.magnitude <= 0.22f;
         }
 
         public bool Owns(Transform t)
@@ -230,7 +253,7 @@ namespace Valhicle.Components
 
             // Check or refresh external target connection periodically
             _targetSearchTimer += dt;
-            if (_targetSearchTimer >= 1.5f)
+            if (_targetSearchTimer >= 1.0f)
             {
                 _targetSearchTimer = 0f;
                 FindExternalTarget();
@@ -239,16 +262,65 @@ namespace Valhicle.Components
             var core = GetComponentInParent<VehicleCore>();
             Rigidbody baseRb = core != null ? core.Rb : GetComponentInParent<Rigidbody>();
 
-            // 1. External target structure physics (if connected between two bodies/structures)
-            if (_externalTargetTransform != null)
+            if (_bearingTarget != null && _externalTargetTransform != null)
+            {
+                SimulateBearingPhysics(baseRb, dt);
+            }
+            else if (_externalTargetTransform != null && _externalTargetRb != null && _externalTargetRb != baseRb)
             {
                 SimulateExternalTargetPhysics(baseRb, dt);
             }
             else
             {
-                // 2. Direct head / mounted assembly physics (wheels, chassis arms, beams mounted on head)
                 SimulateMountedHeadPhysics(baseRb, core, dt);
             }
+        }
+
+        private void SimulateBearingPhysics(Rigidbody baseRb, float dt)
+        {
+            Vector3 basePoint = transform.position - transform.up * (RestLength * 0.42f);
+            Vector3 targetPoint = _externalTargetTransform.TransformPoint(_externalTargetLocalAnchor);
+
+            Vector3 delta = targetPoint - basePoint;
+            float currentDist = delta.magnitude;
+            if (currentDist < 0.05f) return;
+
+            Vector3 dir = delta / currentDist;
+            float disp = currentDist - RestLength;
+
+            float nominalDisp = 0f;
+            if (Mode == SuspensionMode.PushOnly) nominalDisp = MaxExtension;
+            else if (Mode == SuspensionMode.PullOnly) nominalDisp = -MaxCompression;
+
+            float dispError = disp - nominalDisp;
+
+            Vector3 vA = baseRb != null ? baseRb.GetPointVelocity(basePoint) : Vector3.zero;
+            Vector3 vB = Vector3.zero;
+            var core = _bearingTarget.GetComponentInParent<VehicleCore>();
+            if (core != null && core.Rb != null) vB = core.Rb.GetPointVelocity(targetPoint);
+            float relVel = Vector3.Dot(vB - vA, dir);
+
+            float critDamp = 2f * Mathf.Sqrt(SpringForce * 150f) * DampingRatio;
+            float forceMagnitude = -SpringForce * dispError - critDamp * relVel;
+
+            if (Mode == SuspensionMode.PushOnly && forceMagnitude < 0f) forceMagnitude = 0f;
+            if (Mode == SuspensionMode.PullOnly && forceMagnitude > 0f) forceMagnitude = 0f;
+
+            forceMagnitude = Mathf.Clamp(forceMagnitude, -35000f, 35000f);
+            Vector3 forceOnTarget = dir * forceMagnitude;
+
+            Transform head = _bearingTarget.RotatingHead != null ? _bearingTarget.RotatingHead : _bearingTarget.transform;
+            Vector3 r = targetPoint - head.position;
+            Vector3 axis = _bearingTarget.transform.up;
+            float torque = Vector3.Dot(Vector3.Cross(r, forceOnTarget), axis);
+            _bearingTarget.AddTorque(torque);
+
+            if (baseRb != null && !baseRb.isKinematic)
+            {
+                baseRb.AddForceAtPosition(-forceOnTarget, basePoint, ForceMode.Force);
+            }
+
+            CurrentDisplacement = Mathf.Clamp(disp, -MaxCompression, MaxExtension);
         }
 
         private void SimulateExternalTargetPhysics(Rigidbody baseRb, float dt)
@@ -261,29 +333,28 @@ namespace Valhicle.Components
             if (currentDist < 0.05f) return;
 
             Vector3 dir = delta / currentDist;
-            float disp = currentDist - RestLength; // >0 is stretched, <0 is compressed
+            float disp = currentDist - RestLength;
 
-            // Relative velocity along strut axis
+            float nominalDisp = 0f;
+            if (Mode == SuspensionMode.PushOnly) nominalDisp = MaxExtension;
+            else if (Mode == SuspensionMode.PullOnly) nominalDisp = -MaxCompression;
+
+            float dispError = disp - nominalDisp;
+
             Vector3 vA = baseRb != null ? baseRb.GetPointVelocity(basePoint) : Vector3.zero;
-            Vector3 vB = _externalTargetRb != null ? _externalTargetRb.GetPointVelocity(targetPoint) : Vector3.zero;
+            Vector3 vB = _externalTargetRb.GetPointVelocity(targetPoint);
             float relVel = Vector3.Dot(vB - vA, dir);
 
             float critDamp = 2f * Mathf.Sqrt(SpringForce * 200f) * DampingRatio;
-            float forceMagnitude = -SpringForce * disp - critDamp * relVel;
+            float forceMagnitude = -SpringForce * dispError - critDamp * relVel;
 
-            // Apply mode filtering
-            if (Mode == SuspensionMode.PushOnly && forceMagnitude < 0f) forceMagnitude = 0f; // only push
-            if (Mode == SuspensionMode.PullOnly && forceMagnitude > 0f) forceMagnitude = 0f; // only pull
+            if (Mode == SuspensionMode.PushOnly && forceMagnitude < 0f) forceMagnitude = 0f;
+            if (Mode == SuspensionMode.PullOnly && forceMagnitude > 0f) forceMagnitude = 0f;
 
-            // Clamp max physical force to prevent physics glitching
             forceMagnitude = Mathf.Clamp(forceMagnitude, -35000f, 35000f);
-
             Vector3 forceOnTarget = dir * forceMagnitude;
 
-            if (_externalTargetRb != null && !_externalTargetRb.isKinematic)
-            {
-                _externalTargetRb.AddForceAtPosition(forceOnTarget, targetPoint, ForceMode.Force);
-            }
+            _externalTargetRb.AddForceAtPosition(forceOnTarget, targetPoint, ForceMode.Force);
             if (baseRb != null && !baseRb.isKinematic)
             {
                 baseRb.AddForceAtPosition(-forceOnTarget, basePoint, ForceMode.Force);
@@ -294,8 +365,7 @@ namespace Valhicle.Components
 
         private void SimulateMountedHeadPhysics(Rigidbody baseRb, VehicleCore core, float dt)
         {
-            float totalMass = 20f;
-            float externalNormalForce = 0f;
+            float totalMass = 25f;
             float wheelCompression = 0f;
             int groundedWheelCount = 0;
 
@@ -312,8 +382,6 @@ namespace Valhicle.Components
                     {
                         groundedWheelCount++;
                         wheelCompression = Mathf.Max(wheelCompression, wheel.Compression);
-                        // Upward ground contact force pressing against the suspension
-                        externalNormalForce += wheel.Compression * SpringForce * 1.25f;
                     }
                 }
                 else if (t.GetComponent<VehicleEngine>() != null)
@@ -327,28 +395,45 @@ namespace Valhicle.Components
                 }
             }
 
-            // Target displacement based on loads and ground reaction
-            float targetDisp = 0f;
+            float nominalTargetDisp = 0f;
+            if (Mode == SuspensionMode.PushOnly) nominalTargetDisp = MaxExtension;
+            else if (Mode == SuspensionMode.PullOnly) nominalTargetDisp = -MaxCompression;
+
+            float allowedDisp = nominalTargetDisp;
+            Vector3 basePoint = transform.position - transform.up * (RestLength * 0.42f);
+
             if (groundedWheelCount > 0)
             {
-                // Compressed upward by ground contact
-                targetDisp = -wheelCompression * MaxCompression;
+                float wheelContactDisp = -wheelCompression * MaxCompression;
+                if (wheelContactDisp < allowedDisp) allowedDisp = wheelContactDisp;
             }
-            else
+
+            float castRadius = 0.18f;
+            float castDist = RestLength + MaxExtension + 0.15f;
+            int layerMask = ~LayerMask.GetMask("Ignore Raycast");
+            bool hitObstacle = false;
+            RaycastHit obstacleHit = default;
+
+            if (Physics.SphereCast(basePoint, castRadius, transform.up, out RaycastHit hit, castDist, layerMask, QueryTriggerInteraction.Ignore))
             {
-                // Gravity / inertia sag
-                Vector3 g = Physics.gravity;
-                if (baseRb != null) g -= baseRb.linearVelocity * 0.1f;
-                float gAlongStrut = Vector3.Dot(g, transform.up);
-                float sag = (totalMass * gAlongStrut) / Mathf.Max(100f, SpringForce);
-                targetDisp = Mathf.Clamp(sag, -MaxCompression, MaxExtension);
+                if (hit.collider != null && hit.transform != transform && !hit.transform.IsChildOf(transform))
+                {
+                    var hitCore = hit.collider.GetComponentInParent<VehicleCore>();
+                    if (hitCore == null || hitCore != core)
+                    {
+                        hitObstacle = true;
+                        obstacleHit = hit;
+                        float contactDisp = (hit.distance - RestLength * 0.42f) - RestLength * 0.5f;
+                        if (contactDisp < allowedDisp)
+                        {
+                            allowedDisp = Mathf.Clamp(contactDisp, -MaxCompression, MaxExtension);
+                        }
+                    }
+                }
             }
 
-            // Mode restrictions
-            if (Mode == SuspensionMode.PushOnly && targetDisp > 0f) targetDisp = 0f;
-            if (Mode == SuspensionMode.PullOnly && targetDisp < 0f) targetDisp = 0f;
+            float targetDisp = Mathf.Clamp(allowedDisp, -MaxCompression, MaxExtension);
 
-            // Smooth spring-mass-damper simulation for head
             float dispError = targetDisp - CurrentDisplacement;
             float omega = Mathf.Sqrt(SpringForce / Mathf.Max(1f, totalMass));
             float dampCoeff = 2f * omega * DampingRatio;
@@ -360,33 +445,64 @@ namespace Valhicle.Components
             CurrentDisplacement += _headVelocity * dt;
             CurrentDisplacement = Mathf.Clamp(CurrentDisplacement, -MaxCompression, MaxExtension);
 
-            // Transmit reaction force to base chassis
-            if (baseRb != null && !baseRb.isKinematic)
+            float pushingDeflection = nominalTargetDisp - CurrentDisplacement;
+            if (Mathf.Abs(pushingDeflection) > 0.005f || groundedWheelCount > 0 || hitObstacle)
             {
-                float strutForce = -SpringForce * CurrentDisplacement - (dampCoeff * totalMass) * _headVelocity + externalNormalForce;
+                float strutForce = SpringForce * pushingDeflection - (dampCoeff * totalMass) * _headVelocity;
+                if (groundedWheelCount > 0)
+                {
+                    strutForce += wheelCompression * SpringForce * 1.5f;
+                }
+
                 if (Mode == SuspensionMode.PushOnly && strutForce < 0f) strutForce = 0f;
                 if (Mode == SuspensionMode.PullOnly && strutForce > 0f) strutForce = 0f;
 
-                Vector3 reactionForce = transform.up * Mathf.Clamp(strutForce, -25000f, 25000f);
-                baseRb.AddForceAtPosition(reactionForce, transform.position, ForceMode.Force);
+                strutForce = Mathf.Clamp(strutForce, -35000f, 35000f);
+                Vector3 pushVec = transform.up * strutForce;
+
+                if (baseRb != null && !baseRb.isKinematic)
+                {
+                    baseRb.AddForceAtPosition(pushVec, basePoint, ForceMode.Force);
+                }
+
+                if (hitObstacle && obstacleHit.collider != null)
+                {
+                    var otherRb = obstacleHit.collider.GetComponentInParent<Rigidbody>();
+                    if (otherRb != null && otherRb != baseRb && !otherRb.isKinematic)
+                    {
+                        otherRb.AddForceAtPosition(pushVec, obstacleHit.point, ForceMode.Force);
+                    }
+                }
             }
         }
 
         private void FindExternalTarget()
         {
-            if (_loads.Count > 0)
+            _bearingTarget = null;
+            _externalTargetTransform = null;
+            _externalTargetRb = null;
+
+            for (int i = 0; i < _loads.Count; i++)
             {
-                _externalTargetTransform = null;
-                _externalTargetRb = null;
-                return;
+                if (_loads[i].T == null) continue;
+                var b = _loads[i].T.GetComponentInParent<VehicleBearing>();
+                if (b != null && b.transform != transform)
+                {
+                    _bearingTarget = b;
+                    _externalTargetTransform = _loads[i].T;
+                    _externalTargetLocalAnchor = _loads[i].LocalPos;
+                    return;
+                }
             }
 
             Vector3 topMountPos = transform.position + transform.up * (RestLength * 0.45f);
-            var colliders = Physics.OverlapSphere(topMountPos, 0.45f);
+            var colliders = Physics.OverlapSphere(topMountPos, 0.75f);
 
             var myCore = GetComponentInParent<VehicleCore>();
             Transform bestT = null;
             float bestDist = float.MaxValue;
+            VehicleBearing bestBearing = null;
+            Rigidbody bestRb = null;
 
             for (int i = 0; i < colliders.Length; i++)
             {
@@ -394,9 +510,9 @@ namespace Valhicle.Components
                 if (c == null || c.isTrigger) continue;
                 if (c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
-                // Ignore pieces belonging to our own direct parent core unless it's a bearing or separate arm
                 var core = c.GetComponentInParent<VehicleCore>();
                 var bearing = c.GetComponentInParent<VehicleBearing>();
+                var rb = c.GetComponentInParent<Rigidbody>();
 
                 if (core != null && core == myCore && bearing == null)
                 {
@@ -407,20 +523,18 @@ namespace Valhicle.Components
                 if (d < bestDist)
                 {
                     bestDist = d;
-                    bestT = bearing != null && bearing.RotatingHead != null ? bearing.RotatingHead : c.transform;
+                    bestBearing = bearing;
+                    bestRb = rb;
+                    bestT = (bearing != null && bearing.RotatingHead != null) ? bearing.RotatingHead : c.transform;
                 }
             }
 
             if (bestT != null)
             {
+                _bearingTarget = bestBearing;
                 _externalTargetTransform = bestT;
-                _externalTargetRb = bestT.GetComponentInParent<Rigidbody>();
+                _externalTargetRb = bestRb;
                 _externalTargetLocalAnchor = bestT.InverseTransformPoint(topMountPos);
-            }
-            else
-            {
-                _externalTargetTransform = null;
-                _externalTargetRb = null;
             }
         }
 
@@ -480,10 +594,10 @@ namespace Valhicle.Components
                 SpringContainer.localScale = new Vector3(1f, scaleFactor, 1f);
             }
 
-            // Piston rod slide
+            // Piston rod: child of MovingHead, stays at standard local offset in MovingHead
             if (PistonRod != null)
             {
-                PistonRod.localPosition = new Vector3(0f, yTop - halfH * 0.5f, 0f);
+                PistonRod.localPosition = new Vector3(0f, RestLength * 0.15f, 0f);
             }
         }
 
@@ -492,8 +606,6 @@ namespace Valhicle.Components
         /// </summary>
         public void UpdateVisuals(float compressionRatio)
         {
-            if (_loads.Count > 0 || _externalTargetTransform != null) return;
-            CurrentDisplacement = -Mathf.Clamp01(compressionRatio) * MaxCompression;
         }
 
         private void ReclaimTagged()
@@ -509,6 +621,13 @@ namespace Valhicle.Components
                 var nv = p.GetComponent<ZNetView>();
                 if (nv == null || !nv.IsValid()) continue;
                 if (nv.GetZDO().GetZDOID(VehicleUtil.SuspensionZdoKey) != myId) continue;
+
+                if (IsMountSupport(p.transform))
+                {
+                    if (nv.IsOwner()) nv.GetZDO().Set(VehicleUtil.SuspensionZdoKey, ZDOID.None);
+                    continue;
+                }
+
                 RegisterAttachment(p.transform);
             }
         }

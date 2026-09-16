@@ -47,17 +47,17 @@ namespace Valhicle.Core
 
         public void OnPlaced()
         {
-            TryAttachFromWorld(null, null);
+            TryAttachFromWorld(null, null, false, false);
         }
 
         public void OnPlaced(VehicleBearing targetBearing)
         {
-            TryAttachFromWorld(targetBearing, null);
+            TryAttachFromWorld(targetBearing, null, false, false);
         }
 
-        public void OnPlaced(VehicleBearing targetBearing, VehicleSuspension targetSuspension)
+        public void OnPlaced(VehicleBearing targetBearing, VehicleSuspension targetSuspension, bool directHubHit = false, bool directSuspHeadHit = false)
         {
-            TryAttachFromWorld(targetBearing, targetSuspension);
+            TryAttachFromWorld(targetBearing, targetSuspension, directHubHit, directSuspHeadHit);
         }
 
         private void TryRestoreAttachment()
@@ -172,7 +172,7 @@ namespace Valhicle.Core
             }
         }
 
-        public void TryAttachFromWorld(VehicleBearing targetBearing = null, VehicleSuspension targetSuspension = null)
+        public void TryAttachFromWorld(VehicleBearing targetBearing = null, VehicleSuspension targetSuspension = null, bool directHubHit = false, bool directSuspHeadHit = false)
         {
             if (GetComponent<VehicleLift>() != null) return;
 
@@ -250,63 +250,29 @@ namespace Valhicle.Core
             VehicleSuspension suspension = targetSuspension;
             if (suspension == null)
             {
-                var stackPiece = FindClosestOtherPiece();
-                if (stackPiece != null)
-                {
-                    suspension = stackPiece.GetComponent<VehicleSuspension>() ?? stackPiece.GetComponentInParent<VehicleSuspension>();
-                    if (suspension == null && stackPiece.AttachedSuspension != null)
-                    {
-                        suspension = stackPiece.AttachedSuspension;
-                    }
-                }
-            }
-            if (suspension == null)
-            {
-                suspension = FindSuspensionTouchingOrNear(isWheel ? 0.85f : 1.4f, selfSuspension);
+                suspension = FindSuspensionTouchingHead(0.20f, selfSuspension);
+                if (suspension != null) directSuspHeadHit = true;
             }
 
             if (suspension != null && !suspension.IsMountSupport(transform))
             {
-                AttachToSuspension(suspension, true);
+                AttachToSuspension(suspension, true, directSuspHeadHit);
                 return;
             }
 
+            // Check explicit or nearby bearing
             VehicleBearing bearing = targetBearing;
             if (bearing == null)
             {
-                var stackPiece = FindClosestOtherPiece();
-                if (stackPiece != null)
-                {
-                    bearing = stackPiece.GetComponent<VehicleBearing>() ?? stackPiece.GetComponentInParent<VehicleBearing>();
-                    if (bearing == null && stackPiece.AttachedBearing != null)
-                    {
-                        bearing = stackPiece.AttachedBearing;
-                    }
-                    if (bearing == null)
-                    {
-                        var nv = stackPiece.GetComponent<ZNetView>();
-                        if (nv != null && nv.IsValid())
-                        {
-                            var bid = nv.GetZDO().GetZDOID(VehicleUtil.BearingZdoKey);
-                            if (bid != ZDOID.None)
-                            {
-                                var bGo = VehicleUtil.FindByUid(bid);
-                                bearing = bGo != null ? bGo.GetComponent<VehicleBearing>() : null;
-                            }
-                        }
-                    }
-                }
-            }
-            if (bearing == null)
-            {
-                bearing = FindBearingTouchingOrNear(isWheel ? 0.65f : 1.6f, selfBearing);
+                bearing = FindBearingTouchingHub(0.20f, selfBearing);
+                if (bearing != null) directHubHit = true;
             }
 
             if (bearing != null && !bearing.IsMountSupport(transform))
             {
                 var core = bearing.GetComponentInParent<VehicleCore>() ?? nearby;
-                if (core != null) AttachToVehicle(core, bearing, true);
-                else AttachToBearingOnly(bearing, true);
+                if (core != null) AttachToVehicle(core, bearing, true, directHubHit);
+                else AttachToBearingOnly(bearing, true, directHubHit);
                 return;
             }
 
@@ -316,9 +282,9 @@ namespace Valhicle.Core
             }
         }
 
-        private VehicleSuspension FindSuspensionTouchingOrNear(float maxDist, VehicleSuspension exclude)
+        private VehicleSuspension FindSuspensionTouchingHead(float maxDist, VehicleSuspension exclude)
         {
-            var cols = Physics.OverlapSphere(transform.position, Mathf.Max(maxDist, 2.5f));
+            var cols = Physics.OverlapSphere(transform.position, Mathf.Max(maxDist, 0.4f));
             VehicleSuspension best = null;
             float bestDist = float.MaxValue;
             var myCols = GetComponentsInChildren<Collider>();
@@ -331,21 +297,32 @@ namespace Valhicle.Core
                 Transform head = s.MovingHead != null ? s.MovingHead : s.transform;
                 Vector3 headPos = head.position + s.transform.up * (s.RestLength * 0.42f);
 
-                float d = float.MaxValue;
-                if (myCols.Length > 0)
+                Vector3 checkPoint = transform.position;
+                if (myCols != null && myCols.Length > 0)
                 {
+                    float minColDist = float.MaxValue;
                     for (int c = 0; c < myCols.Length; c++)
                     {
                         if (myCols[c] == null || myCols[c].isTrigger) continue;
-                        float cd = Vector3.Distance(headPos, myCols[c].ClosestPoint(headPos));
-                        if (cd < d) d = cd;
+                        Vector3 cp = myCols[c].ClosestPoint(headPos);
+                        float cd = Vector3.Distance(headPos, cp);
+                        if (cd < minColDist)
+                        {
+                            minColDist = cd;
+                            checkPoint = cp;
+                        }
                     }
                 }
-                else
-                {
-                    d = Vector3.Distance(headPos, transform.position);
-                }
 
+                // Must be on the top head side (+up)
+                Vector3 toTransform = checkPoint - s.transform.position;
+                float projUp = Vector3.Dot(toTransform, s.transform.up);
+                if (projUp < s.RestLength * 0.20f) continue; // Lower half or base bracket
+
+                Vector3 radial = toTransform - s.transform.up * projUp;
+                if (radial.magnitude > 0.22f) continue;
+
+                float d = Vector3.Distance(headPos, checkPoint);
                 if (d < maxDist && d < bestDist)
                 {
                     bestDist = d;
@@ -355,9 +332,9 @@ namespace Valhicle.Core
             return best;
         }
 
-        private VehicleBearing FindBearingTouchingOrNear(float maxDist, VehicleBearing exclude)
+        private VehicleBearing FindBearingTouchingHub(float maxDist, VehicleBearing exclude)
         {
-            var cols = Physics.OverlapSphere(transform.position, Mathf.Max(maxDist, 2.5f));
+            var cols = Physics.OverlapSphere(transform.position, Mathf.Max(maxDist, 0.4f));
             VehicleBearing best = null;
             float bestDist = float.MaxValue;
             var myCols = GetComponentsInChildren<Collider>();
@@ -366,25 +343,36 @@ namespace Valhicle.Core
             {
                 if (cols[i] == null) continue;
                 var b = cols[i].GetComponentInParent<VehicleBearing>();
-                if (b == null || b == exclude) continue;
+                if (b == null || b == exclude || b.transform == transform) continue;
                 Transform hub = b.RotatingHead != null ? b.RotatingHead : b.transform;
                 Vector3 hubPos = hub.position;
 
-                float d = float.MaxValue;
-                if (myCols.Length > 0)
+                Vector3 checkPoint = transform.position;
+                if (myCols != null && myCols.Length > 0)
                 {
+                    float minColDist = float.MaxValue;
                     for (int c = 0; c < myCols.Length; c++)
                     {
                         if (myCols[c] == null || myCols[c].isTrigger) continue;
-                        float cd = Vector3.Distance(hubPos, myCols[c].ClosestPoint(hubPos));
-                        if (cd < d) d = cd;
+                        Vector3 cp = myCols[c].ClosestPoint(hubPos);
+                        float cd = Vector3.Distance(hubPos, cp);
+                        if (cd < minColDist)
+                        {
+                            minColDist = cd;
+                            checkPoint = cp;
+                        }
                     }
                 }
-                else
-                {
-                    d = Vector3.Distance(hubPos, transform.position);
-                }
 
+                // Must be on the front button face (+up), NOT on the mount plate (-up)
+                Vector3 toTransform = checkPoint - b.transform.position;
+                float projUp = Vector3.Dot(toTransform, b.transform.up);
+                if (projUp < -0.02f) continue; // Behind or on mount plate
+
+                Vector3 radial = toTransform - b.transform.up * projUp;
+                if (radial.magnitude > 0.22f) continue; // Outside button radius
+
+                float d = Vector3.Distance(hubPos, checkPoint);
                 if (d < maxDist && d < bestDist)
                 {
                     bestDist = d;
@@ -431,7 +419,7 @@ namespace Valhicle.Core
             return best;
         }
 
-        public void AttachToSuspension(VehicleSuspension suspension, bool writeZdo)
+        public void AttachToSuspension(VehicleSuspension suspension, bool writeZdo = true, bool snapToSuspension = false)
         {
             if (suspension == null || suspension.MovingHead == null) return;
             if (transform == suspension.transform) return;
@@ -441,10 +429,12 @@ namespace Valhicle.Core
 
             suspension.RegisterAttachment(transform);
 
-            if (writeZdo && GetComponent<VehicleWheel>() != null
-                && Vector3.Distance(transform.position, suspension.transform.position) < 0.85f)
+            if (writeZdo && GetComponent<VehicleWheel>() != null)
             {
-                VehiclePlacement.SnapWheelToSuspension(transform, suspension);
+                if (snapToSuspension)
+                {
+                    VehiclePlacement.SnapWheelToSuspension(transform, suspension);
+                }
                 suspension.UpdateLoadPose(transform);
             }
 
@@ -491,17 +481,19 @@ namespace Valhicle.Core
             Plugin.Log.LogInfo($"Attached '{name}' to suspension '{suspension.name}'");
         }
 
-        public void AttachToBearingOnly(VehicleBearing bearing, bool writeZdo)
+        public void AttachToBearingOnly(VehicleBearing bearing, bool writeZdo, bool snapToBearing = false)
         {
             if (bearing == null || bearing.RotatingHead == null) return;
             if (transform == bearing.transform) return;
 
             AttachedBearing = bearing;
             bearing.RegisterAttachment(transform);
-            if (GetComponent<VehicleWheel>() != null
-                && Vector3.Distance(transform.position, bearing.transform.position) < 0.65f)
+            if (GetComponent<VehicleWheel>() != null)
             {
-                VehiclePlacement.SnapWheelToBearing(transform, bearing);
+                if (snapToBearing)
+                {
+                    VehiclePlacement.SnapWheelToBearing(transform, bearing);
+                }
                 bearing.UpdateLoadPose(transform);
             }
 
@@ -511,7 +503,7 @@ namespace Valhicle.Core
             }
         }
 
-        public void AttachToVehicle(VehicleCore vehicle, VehicleBearing bearing = null, bool writeZdo = true)
+        public void AttachToVehicle(VehicleCore vehicle, VehicleBearing bearing = null, bool writeZdo = true, bool snapToBearing = false)
         {
             if (vehicle == null) return;
             if (transform == vehicle.transform) return;
@@ -530,10 +522,12 @@ namespace Valhicle.Core
                 VehicleUtil.ParentKeepWorld(transform, parent);
             }
 
-            if (writeZdo && GetComponent<VehicleWheel>() != null && bearing != null
-                && Vector3.Distance(transform.position, bearing.transform.position) < 0.65f)
+            if (writeZdo && GetComponent<VehicleWheel>() != null && bearing != null)
             {
-                VehiclePlacement.SnapWheelToBearing(transform, bearing);
+                if (snapToBearing)
+                {
+                    VehiclePlacement.SnapWheelToBearing(transform, bearing);
+                }
                 bearing.UpdateLoadPose(transform);
             }
 

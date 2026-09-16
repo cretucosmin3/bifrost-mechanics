@@ -34,21 +34,45 @@ namespace Valhicle.Patches
             var vp = placed.GetComponent<VehiclePiece>() ?? placed.gameObject.AddComponent<VehiclePiece>();
             VehicleBearing targetBearing = null;
             VehicleSuspension targetSuspension = null;
-            if (LastHitCollider != null && Time.time - LastHitTime < 4.0f)
+
+            bool directHubHit = false;
+            bool directSuspHeadHit = false;
+
+            if (LastHitCollider != null 
+                && Time.time - LastHitTime < 0.8f 
+                && Vector3.Distance(placed.transform.position, LastHitPoint) < 2.2f)
             {
-                targetBearing = LastHitCollider.GetComponentInParent<VehicleBearing>();
-                targetSuspension = LastHitCollider.GetComponentInParent<VehicleSuspension>();
+                var bearingCandidate = LastHitCollider.GetComponentInParent<VehicleBearing>();
+                if (bearingCandidate != null && bearingCandidate.IsHubTarget(LastHitPoint, LastHitCollider))
+                {
+                    targetBearing = bearingCandidate;
+                    directHubHit = true;
+                }
+
+                var suspCandidate = LastHitCollider.GetComponentInParent<VehicleSuspension>();
+                if (suspCandidate != null && suspCandidate.IsHeadTarget(LastHitPoint, LastHitCollider))
+                {
+                    targetSuspension = suspCandidate;
+                    directSuspHeadHit = true;
+                }
+
                 if (targetBearing == null && targetSuspension == null)
                 {
                     var hitPiece = LastHitCollider.GetComponentInParent<VehiclePiece>();
                     if (hitPiece != null)
                     {
-                        targetBearing = hitPiece.AttachedBearing;
-                        targetSuspension = hitPiece.AttachedSuspension;
+                        if (hitPiece.AttachedBearing != null && hitPiece.AttachedBearing.Owns(hitPiece.transform))
+                        {
+                            targetBearing = hitPiece.AttachedBearing;
+                        }
+                        if (hitPiece.AttachedSuspension != null && hitPiece.AttachedSuspension.Owns(hitPiece.transform))
+                        {
+                            targetSuspension = hitPiece.AttachedSuspension;
+                        }
                     }
                 }
             }
-            vp.OnPlaced(targetBearing, targetSuspension);
+            vp.OnPlaced(targetBearing, targetSuspension, directHubHit, directSuspHeadHit);
         }
 
         private static Piece FindPlacedInstance(Piece prefab, Vector3 pos)

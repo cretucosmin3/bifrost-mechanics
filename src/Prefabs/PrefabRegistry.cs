@@ -752,6 +752,7 @@ namespace Valhicle.Prefabs
             obj.AddComponent<VehiclePiece>();
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, -height * 0.5f, 0f));
             VehicleUtil.AddSnapPoint(movingHead.transform, new Vector3(0f, height * 0.5f, 0f));
+            VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, height * 0.5f, 0f));
 
             FinishPieceRoot(obj, false, label, $"Coiled metal suspension strut ({type}). [E] set force, [Shift+E] mode.", reqs, 160f);
             RegisterPrefab(obj, isPiece: true);

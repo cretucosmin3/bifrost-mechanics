@@ -194,7 +194,8 @@ namespace Valhicle.Patches
 
             var parentId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.ParentZdoKey);
             var bearingId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.BearingZdoKey);
-            if (parentId != ZDOID.None || bearingId != ZDOID.None)
+            var suspensionId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.SuspensionZdoKey);
+            if (parentId != ZDOID.None || bearingId != ZDOID.None || suspensionId != ZDOID.None)
             {
                 if (__instance.GetComponent<Valhicle.Core.VehiclePiece>() == null)
                 {

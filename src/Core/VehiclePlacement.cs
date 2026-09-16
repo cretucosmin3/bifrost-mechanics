@@ -36,7 +36,7 @@ namespace Valhicle.Core
             bool hubAim = bearing != null && bearing.IsHubTarget(hit.point, hit.collider);
 
             var suspension = hit.collider.GetComponentInParent<VehicleSuspension>();
-            bool suspAim = suspension != null;
+            bool suspAim = suspension != null && suspension.IsHeadTarget(hit.point, hit.collider);
 
             bool isWheel = ghost.GetComponent<VehicleWheel>() != null;
             bool isBearing = ghost.GetComponent<VehicleBearing>() != null;
