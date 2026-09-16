@@ -29,6 +29,8 @@ namespace Valhicle.Components
         private ZNetView _nview;
         private float _omega;
         private float _reclaimTimer;
+        private float _arrowHoldTimer;
+        private float _arrowRepeatTimer;
         private Vector3 _lastVehicleVel;
         private readonly List<Load> _loads = new List<Load>();
 
@@ -359,10 +361,62 @@ namespace Valhicle.Components
             var player = Player.m_localPlayer;
             if (player == null || player.InPlaceMode()) return;
             var hover = player.GetHoverObject();
-            if (hover == null || hover.GetComponentInParent<VehicleBearing>() != this) return;
-            float scroll = Input.mouseScrollDelta.y;
-            if (Mathf.Abs(scroll) < 0.01f) return;
-            MaxSteerAngle = Mathf.Clamp(MaxSteerAngle + Mathf.Sign(scroll) * 5f, 15f, 75f);
+            if (hover == null || hover.GetComponentInParent<VehicleBearing>() != this)
+            {
+                _arrowHoldTimer = 0f;
+                _arrowRepeatTimer = 0f;
+                return;
+            }
+            if (VehicleUtil.UiBlocksInput()) return;
+
+            float delta = 0f;
+            if (Input.GetKeyDown(KeyCode.LeftArrow))
+            {
+                delta -= 5f;
+                _arrowHoldTimer = 0f;
+                _arrowRepeatTimer = 0f;
+            }
+            else if (Input.GetKeyDown(KeyCode.RightArrow))
+            {
+                delta += 5f;
+                _arrowHoldTimer = 0f;
+                _arrowRepeatTimer = 0f;
+            }
+            else if (Input.GetKey(KeyCode.LeftArrow))
+            {
+                _arrowHoldTimer += Time.deltaTime;
+                if (_arrowHoldTimer > 0.4f)
+                {
+                    _arrowRepeatTimer += Time.deltaTime;
+                    if (_arrowRepeatTimer >= 0.1f)
+                    {
+                        _arrowRepeatTimer = 0f;
+                        delta -= 5f;
+                    }
+                }
+            }
+            else if (Input.GetKey(KeyCode.RightArrow))
+            {
+                _arrowHoldTimer += Time.deltaTime;
+                if (_arrowHoldTimer > 0.4f)
+                {
+                    _arrowRepeatTimer += Time.deltaTime;
+                    if (_arrowRepeatTimer >= 0.1f)
+                    {
+                        _arrowRepeatTimer = 0f;
+                        delta += 5f;
+                    }
+                }
+            }
+            else
+            {
+                _arrowHoldTimer = 0f;
+                _arrowRepeatTimer = 0f;
+            }
+
+            if (Mathf.Abs(delta) < 0.01f) return;
+
+            MaxSteerAngle = Mathf.Clamp(MaxSteerAngle + delta, 15f, 75f);
             SaveZdo();
             player.Message(MessageHud.MessageType.Center, $"Steer limit: {MaxSteerAngle:0}°");
         }
@@ -419,6 +473,7 @@ namespace Valhicle.Components
                 $"Mode: <color=yellow>{Mode}</color>  {(Reverse ? "REV" : "")}  {MaxSteerAngle:0}°\n" +
                 "[<color=yellow><b>$KEY_Use</b></color>] Cycle   " +
                 "[<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse   " +
+                "[<color=yellow><b>Left / Right arrows</b></color>] Angle   " +
                 spinHint
             );
         }

@@ -165,28 +165,7 @@ namespace Valhicle.Core
             return true;
         }
 
-        private static bool UiBlocksInput()
-        {
-            try
-            {
-                if (Console.IsVisible()) return true;
-            }
-            catch { /* ignored */ }
-
-            try
-            {
-                if (Chat.instance != null && Chat.instance.HasFocus()) return true;
-            }
-            catch { /* ignored */ }
-
-            try
-            {
-                if (TextInput.IsVisible()) return true;
-            }
-            catch { /* ignored */ }
-
-            return false;
-        }
+        private static bool UiBlocksInput() => VehicleUtil.UiBlocksInput();
 
         public bool Interact(Humanoid user, bool hold, bool alt)
         {

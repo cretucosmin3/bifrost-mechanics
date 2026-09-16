@@ -306,5 +306,28 @@ namespace Valhicle.Core
                 }
             }
         }
+
+        public static bool UiBlocksInput()
+        {
+            try
+            {
+                if (Console.IsVisible()) return true;
+            }
+            catch { /* ignored */ }
+
+            try
+            {
+                if (Chat.instance != null && Chat.instance.HasFocus()) return true;
+            }
+            catch { /* ignored */ }
+
+            try
+            {
+                if (TextInput.IsVisible()) return true;
+            }
+            catch { /* ignored */ }
+
+            return false;
+        }
     }
 }
