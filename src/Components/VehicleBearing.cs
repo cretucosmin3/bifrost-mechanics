@@ -16,7 +16,7 @@ namespace Valhicle.Components
     /// The chassis the bearing sits on is never attached.
     /// </summary>
     [DefaultExecutionOrder(20000)]
-    public class VehicleBearing : MonoBehaviour, Interactable, Hoverable
+    public class VehicleBearing : MonoBehaviour, Interactable, Hoverable, TextReceiver
     {
         public BearingMode Mode = BearingMode.FreeSpinning;
         public float MaxSteerAngle = 35f;
@@ -61,6 +61,8 @@ namespace Valhicle.Components
                 Mode = (BearingMode)zdo.GetInt(GetZdoKey("Mode"), (int)Mode);
                 Reverse = zdo.GetBool(GetZdoKey("Reverse"), false);
                 MaxSteerAngle = zdo.GetFloat(GetZdoKey("Angle"), MaxSteerAngle);
+                MotorSpeed = zdo.GetFloat(GetZdoKey("MotorSpeed"), MotorSpeed);
+                SteerSpeed = zdo.GetFloat(GetZdoKey("SteerSpeed"), SteerSpeed);
                 CurrentAngle = zdo.GetFloat(GetZdoKey("CurAngle"), CurrentAngle);
             }
             EnsureHead();
@@ -399,42 +401,62 @@ namespace Valhicle.Components
             }
             if (VehicleUtil.UiBlocksInput()) return;
 
+            // R key toggles reverse while hovering
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                Reverse = !Reverse;
+                SaveZdo();
+                player.Message(MessageHud.MessageType.Center, Reverse ? "Bearing: Reversed" : "Bearing: Normal / Forward");
+                return;
+            }
+
+            // Enter key opens exact numerical input dialog
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            {
+                OpenConfigDialog();
+                return;
+            }
+
             float delta = 0f;
+            float coarseDelta = 0f;
+
             if (Input.GetKeyDown(KeyCode.LeftArrow))
             {
-                delta -= 5f;
+                delta -= 1f;
                 _arrowHoldTimer = 0f;
                 _arrowRepeatTimer = 0f;
             }
             else if (Input.GetKeyDown(KeyCode.RightArrow))
             {
-                delta += 5f;
+                delta += 1f;
                 _arrowHoldTimer = 0f;
                 _arrowRepeatTimer = 0f;
             }
             else if (Input.GetKey(KeyCode.LeftArrow))
             {
                 _arrowHoldTimer += Time.deltaTime;
-                if (_arrowHoldTimer > 0.4f)
+                if (_arrowHoldTimer > 0.35f)
                 {
                     _arrowRepeatTimer += Time.deltaTime;
-                    if (_arrowRepeatTimer >= 0.1f)
+                    float repeatRate = _arrowHoldTimer > 1.5f ? 0.04f : 0.08f;
+                    if (_arrowRepeatTimer >= repeatRate)
                     {
                         _arrowRepeatTimer = 0f;
-                        delta -= 5f;
+                        delta -= _arrowHoldTimer > 2.5f ? 4f : 1f;
                     }
                 }
             }
             else if (Input.GetKey(KeyCode.RightArrow))
             {
                 _arrowHoldTimer += Time.deltaTime;
-                if (_arrowHoldTimer > 0.4f)
+                if (_arrowHoldTimer > 0.35f)
                 {
                     _arrowRepeatTimer += Time.deltaTime;
-                    if (_arrowRepeatTimer >= 0.1f)
+                    float repeatRate = _arrowHoldTimer > 1.5f ? 0.04f : 0.08f;
+                    if (_arrowRepeatTimer >= repeatRate)
                     {
                         _arrowRepeatTimer = 0f;
-                        delta += 5f;
+                        delta += _arrowHoldTimer > 2.5f ? 4f : 1f;
                     }
                 }
             }
@@ -444,38 +466,136 @@ namespace Valhicle.Components
                 _arrowRepeatTimer = 0f;
             }
 
-            if (Mathf.Abs(delta) < 0.01f) return;
+            if (Input.GetKeyDown(KeyCode.DownArrow)) coarseDelta -= 1f;
+            if (Input.GetKeyDown(KeyCode.UpArrow)) coarseDelta += 1f;
 
-            MaxSteerAngle = Mathf.Clamp(MaxSteerAngle + delta, 15f, 75f);
-            SaveZdo();
-            player.Message(MessageHud.MessageType.Center, $"Steer limit: {MaxSteerAngle:0}°");
+            if (Mathf.Abs(delta) < 0.001f && Mathf.Abs(coarseDelta) < 0.001f) return;
+
+            if (Mode == BearingMode.Motorized)
+            {
+                if (Mathf.Abs(delta) > 0.001f)
+                {
+                    MotorSpeed = Mathf.Clamp(MotorSpeed + delta * 15f, 5f, 3600f);
+                }
+                if (Mathf.Abs(coarseDelta) > 0.001f)
+                {
+                    MotorSpeed = Mathf.Clamp(MotorSpeed + coarseDelta * 60f, 5f, 3600f);
+                }
+                SaveZdo();
+                player.Message(MessageHud.MessageType.Center, $"Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)");
+            }
+            else if (Mode == BearingMode.Steering)
+            {
+                if (Mathf.Abs(delta) > 0.001f)
+                {
+                    MaxSteerAngle = Mathf.Clamp(MaxSteerAngle + delta * 5f, 10f, 85f);
+                    SaveZdo();
+                    player.Message(MessageHud.MessageType.Center, $"Steer Limit: {MaxSteerAngle:0}°");
+                }
+                if (Mathf.Abs(coarseDelta) > 0.001f)
+                {
+                    SteerSpeed = Mathf.Clamp(SteerSpeed + coarseDelta * 20f, 30f, 720f);
+                    SaveZdo();
+                    player.Message(MessageHud.MessageType.Center, $"Steer Pivot Speed: {SteerSpeed:0}°/s");
+                }
+            }
+            else if (Mode == BearingMode.FreeSpinning)
+            {
+                if (Mathf.Abs(delta) > 0.001f)
+                {
+                    _omega += delta * 60f;
+                    player.Message(MessageHud.MessageType.Center, "Bearing: Spun push");
+                }
+            }
+        }
+
+        private void OpenConfigDialog()
+        {
+            if (TextInput.instance == null) return;
+            string prompt = Mode == BearingMode.Motorized
+                ? "Motor Speed (5 - 3600 °/s or e.g. '30 rpm')"
+                : "Steer Angle Limit (10 - 85°)";
+            TextInput.instance.RequestText(this, prompt, 12);
         }
 
         public bool Interact(Humanoid user, bool hold, bool alt)
         {
+            var player = user as Player;
+            if (player == null) return false;
+
             if (hold)
             {
                 if (Mode == BearingMode.FreeSpinning)
                 {
-                    _omega += alt ? -200f : 200f;
+                    _omega += alt ? -250f : 250f;
+                    player.Message(MessageHud.MessageType.Center, "Bearing: Spun push");
                     return true;
                 }
-                return false;
-            }
-            var player = user as Player;
-            if (player == null) return false;
-            if (alt)
-            {
-                Reverse = !Reverse;
-                SaveZdo();
-                player.Message(MessageHud.MessageType.Center, Reverse ? "Bearing: Reversed" : "Bearing: Normal");
+
+                // [Hold E] in Motorized or Steering mode opens exact text input dialog
+                OpenConfigDialog();
                 return true;
             }
+
+            if (alt)
+            {
+                // [Shift + E] toggles Reverse
+                Reverse = !Reverse;
+                SaveZdo();
+                player.Message(MessageHud.MessageType.Center, Reverse ? "Bearing: Reversed" : "Bearing: Normal / Forward");
+                return true;
+            }
+
+            // [E] cycles Mode: Steering -> FreeSpinning -> Motorized -> Steering
             Mode = (BearingMode)(((int)Mode + 1) % 3);
             _omega = 0f;
             SaveZdo();
             player.Message(MessageHud.MessageType.Center, $"Bearing: {Mode}");
             return true;
+        }
+
+        public string GetText()
+        {
+            if (Mode == BearingMode.Motorized)
+            {
+                return ((int)MotorSpeed).ToString();
+            }
+            return ((int)MaxSteerAngle).ToString();
+        }
+
+        public void SetText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            text = text.Trim();
+
+            bool isRpm = text.ToLowerInvariant().EndsWith("rpm");
+            if (isRpm)
+            {
+                text = text.Substring(0, text.Length - 3).Trim();
+            }
+
+            if (float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val))
+            {
+                if (isRpm) val *= 6f; // 1 RPM = 6 deg/sec
+
+                if (Mode == BearingMode.Motorized)
+                {
+                    if (val < 0f)
+                    {
+                        Reverse = true;
+                        val = Mathf.Abs(val);
+                    }
+                    MotorSpeed = Mathf.Clamp(val, 5f, 3600f);
+                    SaveZdo();
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)");
+                }
+                else if (Mode == BearingMode.Steering)
+                {
+                    MaxSteerAngle = Mathf.Clamp(Mathf.Abs(val), 10f, 85f);
+                    SaveZdo();
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Steer Limit: {MaxSteerAngle:0}°");
+                }
+            }
         }
 
         public void SyncZdo()
@@ -490,6 +610,8 @@ namespace Valhicle.Components
             zdo.Set(GetZdoKey("Mode"), (int)Mode);
             zdo.Set(GetZdoKey("Reverse"), Reverse);
             zdo.Set(GetZdoKey("Angle"), MaxSteerAngle);
+            zdo.Set(GetZdoKey("MotorSpeed"), MotorSpeed);
+            zdo.Set(GetZdoKey("SteerSpeed"), SteerSpeed);
             zdo.Set(GetZdoKey("CurAngle"), CurrentAngle);
         }
 
@@ -497,21 +619,47 @@ namespace Valhicle.Components
 
         public string GetHoverText()
         {
-            string spinHint = Mode == BearingMode.FreeSpinning ? "[<color=yellow><b>Hold $KEY_Use</b></color>] Spin push   " : "";
-            return Localization.instance.Localize(
-                "<b>Mechanical Bearing</b>\n" +
-                $"Mode: <color=yellow>{Mode}</color>  {(Reverse ? "REV" : "")}  {MaxSteerAngle:0}°\n" +
-                "[<color=yellow><b>$KEY_Use</b></color>] Cycle   " +
-                "[<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse   " +
-                "[<color=yellow><b>Left / Right arrows</b></color>] Angle   " +
-                spinHint
-            );
+            string dirStr = Reverse ? "<color=orange>REV</color>" : "<color=cyan>FWD</color>";
+
+            if (Mode == BearingMode.Motorized)
+            {
+                return Localization.instance.Localize(
+                    "<b>Mechanical Bearing (Motorized)</b>\n" +
+                    $"Speed: <color=yellow>{MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)</color>   Dir: {dirStr}\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Speed (±15°/s)   [<color=yellow><b>Up / Down</b></color>] ±60°/s\n" +
+                    "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Set Speed   [<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse"
+                );
+            }
+            else if (Mode == BearingMode.Steering)
+            {
+                return Localization.instance.Localize(
+                    "<b>Mechanical Bearing (Steering)</b>\n" +
+                    $"Limit: <color=yellow>{MaxSteerAngle:0}°</color>   Speed: <color=yellow>{SteerSpeed:0}°/s</color>   Dir: {dirStr}\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Steer Limit   [<color=yellow><b>Up / Down</b></color>] Steer Speed\n" +
+                    "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Set Angle   [<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse"
+                );
+            }
+            else
+            {
+                return Localization.instance.Localize(
+                    "<b>Mechanical Bearing (Free Spinning)</b>\n" +
+                    "Mode: <color=yellow>Free Spinning (Physics)</color>\n" +
+                    "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Spin Push"
+                );
+            }
         }
 
         public string GetHoverName() => "Mechanical Bearing";
 
         public float GetHoverOffset() => 0f;
 
-        private string GetZdoKey(string subKey) => $"Valhicle_Bearing_{subKey}";
+        private string GetZdoKey(string subKey)
+        {
+            if (_nview != null && _nview.gameObject != gameObject)
+            {
+                return $"Valhicle_B_{GetInstanceID()}_{subKey}";
+            }
+            return $"Valhicle_Bearing_{subKey}";
+        }
     }
 }
