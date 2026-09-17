@@ -166,7 +166,14 @@ namespace Valhicle.Components
 
             // Lateral grip resists sliding sideways
             float lateralVelocity = Vector3.Dot(pointVelocity, wheelRight);
-            netForce += wheelRight * Mathf.Clamp(-lateralVelocity * (GripFactor * 3200f), -12000f, 12000f);
+            if (Mathf.Abs(lateralVelocity) > 0.02f)
+            {
+                netForce += wheelRight * Mathf.Clamp(-lateralVelocity * (GripFactor * 3200f), -12000f, 12000f);
+            }
+            else
+            {
+                netForce += wheelRight * (-lateralVelocity * (GripFactor * 400f));
+            }
 
             // Surface-tangent drive direction drives the wheel UP the face of rocks and slopes
             Vector3 climbDir = Vector3.ProjectOnPlane(driveDir, best.normal).normalized;
@@ -177,8 +184,15 @@ namespace Valhicle.Components
 
             if (brakeForce > 0.01f)
             {
-                float brake = -Mathf.Sign(longitudinalVelocity) * Mathf.Min(Mathf.Abs(longitudinalVelocity) * 2000f, brakeForce);
-                netForce += climbDir * brake;
+                if (Mathf.Abs(longitudinalVelocity) > 0.02f)
+                {
+                    float brake = -Mathf.Sign(longitudinalVelocity) * Mathf.Min(Mathf.Abs(longitudinalVelocity) * 2000f, brakeForce);
+                    netForce += climbDir * brake;
+                }
+                else
+                {
+                    netForce += climbDir * (-longitudinalVelocity * 400f);
+                }
             }
             else if (IsMotorized && Mathf.Abs(driveTorque) > 0.01f)
             {

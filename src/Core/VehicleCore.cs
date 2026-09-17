@@ -275,6 +275,15 @@ namespace Valhicle.Core
 
             ApplyAntiRoll();
 
+            if (Mathf.Abs(throttle) < 0.02f && Mathf.Abs(steer) < 0.02f)
+            {
+                if (Rb.linearVelocity.sqrMagnitude < 0.015f && Rb.angularVelocity.sqrMagnitude < 0.015f)
+                {
+                    Rb.linearVelocity = Vector3.MoveTowards(Rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 2.5f);
+                    Rb.angularVelocity = Vector3.MoveTowards(Rb.angularVelocity, Vector3.zero, Time.fixedDeltaTime * 4.0f);
+                }
+            }
+
             if (Rb.linearVelocity.magnitude > MaxSpeed)
             {
                 Rb.linearVelocity = Vector3.ClampMagnitude(Rb.linearVelocity, MaxSpeed);
@@ -291,11 +300,11 @@ namespace Valhicle.Core
         private void ApplyAntiRoll()
         {
             if (Wheels.Count < 2) return;
-            Vector3 right = transform.right;
             float tilt = Vector3.Dot(transform.up, Vector3.up);
-            if (tilt > 0.98f) return;
+            if (tilt > 0.995f) return;
+            float rollError = Mathf.Clamp01(1f - tilt);
             Vector3 correction = Vector3.Cross(transform.up, Vector3.up);
-            Rb.AddTorque(correction * AntiRollForce * (1f - Mathf.Clamp01(tilt)), ForceMode.Force);
+            Rb.AddTorque(correction * (AntiRollForce * rollError * rollError * 50f), ForceMode.Force);
         }
 
         public void SyncAttachedZdos()

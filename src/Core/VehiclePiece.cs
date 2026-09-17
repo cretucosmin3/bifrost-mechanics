@@ -533,7 +533,7 @@ namespace Valhicle.Core
                 bearing.UpdateLoadPose(transform);
             }
 
-            // Child pieces must not simulate as separate bodies.
+            // Child pieces must not simulate as separate bodies or fight parent sync.
             var childCore = GetComponent<VehicleCore>();
             if (childCore != null && childCore != vehicle)
             {
@@ -544,6 +544,14 @@ namespace Valhicle.Core
             {
                 DestroyImmediate(childRb);
             }
+            foreach (var sync in GetComponentsInChildren<ZSyncTransform>(true))
+            {
+                if (sync != null && sync.gameObject != vehicle.gameObject)
+                {
+                    DestroyImmediate(sync);
+                }
+            }
+            VehicleUtil.StripSnowOverlays(gameObject);
 
             if (WearNTearComponent != null)
             {

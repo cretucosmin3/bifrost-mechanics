@@ -321,6 +321,17 @@ namespace Valhicle.Prefabs
                 UnityEngine.Object.DestroyImmediate(w);
             }
             VehicleUtil.StripSnowOverlays(vis);
+            var allChildTransforms = vis.GetComponentsInChildren<Transform>(true);
+            for (int i = allChildTransforms.Length - 1; i >= 0; i--)
+            {
+                var ct = allChildTransforms[i];
+                if (ct == null || ct == vis.transform) continue;
+                string cn = ct.name.ToLowerInvariant();
+                if (cn.Contains("worn") || cn.Contains("broken") || cn.Contains("damaged"))
+                {
+                    UnityEngine.Object.DestroyImmediate(ct.gameObject);
+                }
+            }
             foreach (var mr in vis.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (mr == null) continue;
@@ -500,7 +511,6 @@ namespace Valhicle.Prefabs
                 "2m x 2m wooden chassis. Structural foundation of a motorized cart.",
                 new[] { Req("Wood", 4), Req("BronzeNails", 2) });
 
-            CreateSolidDeck(obj.transform, new Vector3(2.0f, 0.15f, 2.0f));
             var clonedChassis = AttachClonedVisual(floorPrefab, obj.transform);
             if (clonedChassis != null) clonedChassis.name = "ChassisDeck";
 
@@ -1122,6 +1132,15 @@ namespace Valhicle.Prefabs
             if (stand != null) UnityEngine.Object.DestroyImmediate(stand);
 
             StripClonedJunk(clone);
+            for (int i = clone.transform.childCount - 1; i >= 0; i--)
+            {
+                var ct = clone.transform.GetChild(i);
+                string cn = ct.name.ToLowerInvariant();
+                if (cn.Contains("worn") || cn.Contains("broken") || cn.Contains("damaged"))
+                {
+                    UnityEngine.Object.DestroyImmediate(ct.gameObject);
+                }
+            }
 
             var piece = clone.GetComponent<Piece>() ?? clone.AddComponent<Piece>();
             ApplyPieceMeta(piece, label, desc, requirements, false);

@@ -62,14 +62,28 @@ namespace Valhicle.Patches
         [HarmonyPostfix]
         private static void FindHoverObjectPostfix(Player __instance, ref GameObject hover)
         {
-            if (hover == null || GameCamera.instance == null) return;
-            if (hover.GetComponent<VehicleLift>() == null && hover.GetComponent<VehicleCore>() == null)
+            if (GameCamera.instance == null || __instance == null) return;
+            if (hover == null) return;
+
+            var vehicle = hover.GetComponentInParent<VehicleCore>();
+            var lift = hover.GetComponentInParent<VehicleLift>();
+            if (vehicle == null && lift == null) return;
+
+            Transform vehicleRoot = vehicle != null ? vehicle.transform : lift.transform;
+
+            float maxDist = 5f;
+            try
             {
-                return;
+                maxDist = Traverse.Create(__instance).Field<float>("m_maxInteractDistance").Value;
+                if (maxDist < 1f) maxDist = 5f;
+            }
+            catch
+            {
+                maxDist = 5f;
             }
 
             int mask = LayerMask.GetMask("Default", "static_solid", "piece", "piece_nonsolid", "item", "character", "vehicle");
-            if (!Physics.Raycast(GameCamera.instance.transform.position, GameCamera.instance.transform.forward, out var hit, 12f, mask, QueryTriggerInteraction.Collide))
+            if (!Physics.Raycast(GameCamera.instance.transform.position, GameCamera.instance.transform.forward, out var hit, 16f, mask, QueryTriggerInteraction.Collide))
             {
                 return;
             }
@@ -77,18 +91,70 @@ namespace Valhicle.Patches
             var col = hit.collider;
             if (col == null) return;
 
-            Component better = col.GetComponentInParent<VehicleSeat>();
-            if (better == null) better = col.GetComponentInParent<VehicleEngine>();
-            if (better == null) better = col.GetComponentInParent<VehicleWheel>();
-            if (better == null) better = col.GetComponentInParent<VehicleBearing>();
-            if (better == null) return;
-            if (better.GetComponentInParent<VehicleCore>() != hover.GetComponentInParent<VehicleCore>()
-                && better.GetComponentInParent<VehicleLift>() != hover.GetComponent<VehicleLift>())
+            // Ensure the raycast hit actually belongs to this vehicle hierarchy
+            if (col.transform != vehicleRoot && !col.transform.IsChildOf(vehicleRoot))
             {
-                // still allow if it's on this vehicle
-                if (better.GetComponentInParent<VehicleCore>() == null) return;
+                return;
             }
-            hover = better.gameObject;
+
+            // Check interact distance
+            Hoverable targetHoverable = col.GetComponentInParent<Hoverable>();
+            float hoverOffset = targetHoverable != null ? targetHoverable.GetHoverOffset() : 0f;
+            if (Vector3.Distance(__instance.GetEyePoint(), hit.point) > maxDist + hoverOffset + 1.5f)
+            {
+                return;
+            }
+
+            // Walk upwards from the hit collider looking for the most specific Hoverable / Interactable
+            Transform current = col.transform;
+            GameObject specificTarget = null;
+
+            while (current != null && current != vehicleRoot)
+            {
+                // Prefer specific vehicle components or game interactables (Bed, Container, Chair, Door, CraftingStation, etc.)
+                var h = current.GetComponent<Hoverable>();
+                var inter = current.GetComponent<Interactable>();
+                if (h != null || inter != null)
+                {
+                    specificTarget = current.gameObject;
+                    break;
+                }
+
+                // If this is a Piece with interactive children
+                var piece = current.GetComponent<Piece>();
+                if (piece != null)
+                {
+                    var childHoverable = piece.GetComponentInChildren<Hoverable>(true);
+                    var childInteractable = piece.GetComponentInChildren<Interactable>(true);
+                    if (childHoverable != null)
+                    {
+                        specificTarget = (childHoverable as MonoBehaviour)?.gameObject ?? piece.gameObject;
+                        break;
+                    }
+                    if (childInteractable != null)
+                    {
+                        specificTarget = (childInteractable as MonoBehaviour)?.gameObject ?? piece.gameObject;
+                        break;
+                    }
+                }
+
+                current = current.parent;
+            }
+
+            if (specificTarget != null)
+            {
+                hover = specificTarget;
+            }
+            else
+            {
+                // If the player aimed at an attached structural piece (e.g. wood wall or roof)
+                // that has no interaction, do not display the vehicle lift menu!
+                var vp = col.GetComponentInParent<VehiclePiece>();
+                if (vp != null && vp.transform != vehicleRoot)
+                {
+                    hover = null;
+                }
+            }
         }
 
         [HarmonyPatch("UpdateKnownRecipesList")]
