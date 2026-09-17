@@ -42,6 +42,10 @@ namespace Valhicle.Patches
             if (lift == null && vehicle != null)
             {
                 lift = vehicle.GetComponent<VehicleLift>() ?? vehicle.CurrentLift;
+                if (lift == null)
+                {
+                    lift = vehicle.gameObject.AddComponent<VehicleLift>();
+                }
             }
 
             if (lift != null)

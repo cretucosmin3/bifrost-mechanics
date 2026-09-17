@@ -74,8 +74,13 @@ namespace Valhicle.Core
         public void UprightVehicle()
         {
             if (Core == null) Core = GetComponent<VehicleCore>();
+            if (_nview == null) _nview = GetComponent<ZNetView>();
+            if (_nview != null && _nview.IsValid() && !_nview.IsOwner())
+            {
+                _nview.ClaimOwnership();
+            }
 
-            // 1. Calculate upright rotation preserving horizontal yaw (zero pitch and roll)
+            // 1. Calculate upright rotation snapped to nearest building rotation angle (multiples of 22.5°)
             Vector3 fwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
             if (fwd.sqrMagnitude < 0.001f)
             {
@@ -85,7 +90,12 @@ namespace Valhicle.Core
                 if (fwd.sqrMagnitude < 0.001f)
                     fwd = Vector3.forward;
             }
-            transform.rotation = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+
+            Quaternion rawRot = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+            float rawYaw = rawRot.eulerAngles.y;
+            float step = VehicleUtil.GetBuildRotationStep();
+            float snappedYaw = VehicleUtil.SnapYawToBuildAngle(rawYaw, step);
+            transform.rotation = Quaternion.Euler(0f, snappedYaw, 0f);
 
             // 2. Clear physics velocities so it doesn't carry residual momentum
             if (Core != null && Core.Rb != null)
@@ -129,9 +139,14 @@ namespace Valhicle.Core
 
             if (_nview != null && _nview.IsValid() && _nview.IsOwner())
             {
+                _nview.GetZDO().SetPosition(transform.position);
+                _nview.GetZDO().SetRotation(transform.rotation);
                 _nview.GetZDO().Set(HeightZdoKey, targetHeight);
                 _nview.GetZDO().Set(GroundYZdoKey, _groundY);
             }
+
+            Core?.ScanChildComponents();
+            Core?.SyncAttachedZdos();
         }
 
         public void ReleaseToPhysics()
@@ -158,11 +173,16 @@ namespace Valhicle.Core
             p.y = _groundY + height;
             transform.position = p;
 
+            Physics.SyncTransforms();
+
             if (_nview != null && _nview.IsValid() && _nview.IsOwner())
             {
+                _nview.GetZDO().SetPosition(transform.position);
                 _nview.GetZDO().Set(HeightZdoKey, height);
                 _nview.GetZDO().Set(GroundYZdoKey, _groundY);
             }
+
+            Core?.SyncAttachedZdos();
         }
 
         public void AdjustHeight(float delta)

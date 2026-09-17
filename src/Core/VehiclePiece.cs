@@ -221,9 +221,11 @@ namespace Valhicle.Core
             {
                 if (nearby != null)
                 {
+                    var extraLift = GetComponent<VehicleLift>();
                     var extraRb = GetComponent<Rigidbody>();
                     var extraSync = GetComponent<ZSyncTransform>();
                     DestroyImmediate(selfCore);
+                    if (extraLift != null) DestroyImmediate(extraLift);
                     if (extraRb != null) DestroyImmediate(extraRb);
                     if (extraSync != null) DestroyImmediate(extraSync);
                     AttachToVehicle(nearby, null, true);

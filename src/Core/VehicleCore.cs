@@ -152,6 +152,8 @@ namespace Valhicle.Core
             }
 
             VehicleUtil.ForceWorldScaleOne(transform);
+            ScanChildComponents();
+            SyncAttachedZdos();
         }
 
         public void ReleaseFromLift()
@@ -296,7 +298,7 @@ namespace Valhicle.Core
             Rb.AddTorque(correction * AntiRollForce * (1f - Mathf.Clamp01(tilt)), ForceMode.Force);
         }
 
-        private void SyncAttachedZdos()
+        public void SyncAttachedZdos()
         {
             if (NetView != null && NetView.IsValid() && NetView.IsOwner())
             {

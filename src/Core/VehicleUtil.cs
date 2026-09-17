@@ -330,5 +330,29 @@ namespace Valhicle.Core
 
             return false;
         }
+
+        public static float GetBuildRotationStep()
+        {
+            if (Player.m_localPlayer != null)
+            {
+                try
+                {
+                    float deg = HarmonyLib.Traverse.Create(Player.m_localPlayer).Field<float>("m_placeRotationDegrees").Value;
+                    if (deg > 0.01f) return deg;
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+            return 22.5f;
+        }
+
+        public static float SnapYawToBuildAngle(float yaw, float step = 22.5f)
+        {
+            if (step <= 0.01f) step = 22.5f;
+            float snapped = Mathf.Round(yaw / step) * step;
+            return (snapped % 360f + 360f) % 360f;
+        }
     }
 }
