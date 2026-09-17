@@ -25,6 +25,17 @@ namespace Valhicle.Components
         public bool Reverse;
         public Transform RotatingHead;
         public float CurrentAngle { get; private set; }
+        public float FreeSpinLimit = 0f; // 0 = continuous 360°, >0 = limited travel (e.g. 45° for suspension)
+
+        public float CurrentAngularVelocity
+        {
+            get
+            {
+                if (Mode == BearingMode.Motorized) return MotorSpeed * (Reverse ? -1f : 1f);
+                if (Mode == BearingMode.FreeSpinning) return _omega;
+                return 0f;
+            }
+        }
 
         private ZNetView _nview;
         private float _omega;
@@ -64,6 +75,7 @@ namespace Valhicle.Components
                 MotorSpeed = zdo.GetFloat(GetZdoKey("MotorSpeed"), MotorSpeed);
                 SteerSpeed = zdo.GetFloat(GetZdoKey("SteerSpeed"), SteerSpeed);
                 CurrentAngle = zdo.GetFloat(GetZdoKey("CurAngle"), CurrentAngle);
+                FreeSpinLimit = zdo.GetFloat(GetZdoKey("FreeSpinLimit"), FreeSpinLimit);
             }
             EnsureHead();
             if (RotatingHead != null)
@@ -106,10 +118,6 @@ namespace Valhicle.Components
             if (t.GetComponent<VehicleCore>() != null || t.GetComponent<VehicleLift>() != null) return true;
             if (Owns(t)) return false;
 
-            // Any piece physically behind the mount plate is on the chassis/support side
-            Vector3 localPos = transform.InverseTransformPoint(t.position);
-            if (localPos.y < -0.05f) return true;
-
             return false;
         }
 
@@ -126,9 +134,12 @@ namespace Valhicle.Components
         {
             if (t == null) return;
             EnsureHead();
-            if (IsMountSupport(t)) return;
+            if (t == transform || t == RotatingHead) return;
+            if (transform.IsChildOf(t) || t == transform.parent) return;
+            var vp = t.GetComponent<VehiclePiece>();
+            if (vp != null) vp.StripStrayVehicleComponents();
+            if (t.GetComponent<VehicleCore>() != null || t.GetComponent<VehicleLift>() != null) return;
             if (t.GetComponent<VehicleSeat>() != null || t.GetComponent<VehicleEngine>() != null) return;
-            if (t.GetComponent<VehicleBearing>() != null) return;
 
             for (int i = 0; i < _loads.Count; i++)
             {
@@ -203,11 +214,17 @@ namespace Valhicle.Components
             }
         }
 
+        private void FixedUpdate()
+        {
+            if (VehicleUtil.IsPlacementGhost(gameObject)) return;
+            EnsureHead();
+            TickRotation(Time.fixedDeltaTime);
+        }
+
         private void LateUpdate()
         {
             if (VehicleUtil.IsPlacementGhost(gameObject)) return;
             EnsureHead();
-            TickRotation(Time.deltaTime);
 
             for (int i = _loads.Count - 1; i >= 0; i--)
             {
@@ -244,9 +261,22 @@ namespace Valhicle.Components
             {
                 case BearingMode.Steering:
                     if (freeze) break;
-                    float steer = core != null ? core.GetSteerInput() : 0f;
-                    if (Reverse) steer = -steer;
-                    CurrentAngle = Mathf.MoveTowards(CurrentAngle, steer * MaxSteerAngle, SteerSpeed * dt);
+                    if (occupied)
+                    {
+                        float steer = core != null ? core.GetSteerInput() : 0f;
+                        if (Reverse) steer = -steer;
+                        CurrentAngle = Mathf.MoveTowards(CurrentAngle, steer * MaxSteerAngle, SteerSpeed * dt);
+                        _externalTorque = 0f;
+                    }
+                    else
+                    {
+                        if (Mathf.Abs(_externalTorque) > 0.05f)
+                        {
+                            float steerNudge = Mathf.Clamp(_externalTorque * 0.02f, -120f, 120f) * dt;
+                            CurrentAngle = Mathf.Clamp(CurrentAngle + steerNudge, -MaxSteerAngle, MaxSteerAngle);
+                            _externalTorque = 0f;
+                        }
+                    }
                     break;
                 case BearingMode.Motorized:
                     if (!freeze) CurrentAngle += MotorSpeed * (Reverse ? -1f : 1f) * dt;
@@ -259,7 +289,24 @@ namespace Valhicle.Components
                     break;
             }
 
-            if (CurrentAngle > 360f || CurrentAngle < -360f) CurrentAngle %= 360f;
+            if (FreeSpinLimit > 1f && Mode == BearingMode.FreeSpinning)
+            {
+                if (CurrentAngle > FreeSpinLimit)
+                {
+                    CurrentAngle = FreeSpinLimit;
+                    if (_omega > 0f) _omega = -_omega * 0.15f;
+                }
+                else if (CurrentAngle < -FreeSpinLimit)
+                {
+                    CurrentAngle = -FreeSpinLimit;
+                    if (_omega < 0f) _omega = -_omega * 0.15f;
+                }
+            }
+            else
+            {
+                if (CurrentAngle > 360f || CurrentAngle < -360f) CurrentAngle %= 360f;
+            }
+
             RotatingHead.localRotation = Quaternion.Euler(0f, CurrentAngle, 0f);
         }
 
@@ -284,9 +331,9 @@ namespace Valhicle.Components
                 _lastVehicleVel = v;
             }
 
-            float totalTorque = _externalTorque;
+            float totalTorque = Mathf.Clamp(_externalTorque, -4000f, 4000f);
             _externalTorque = 0f;
-            float totalInertia = 0.8f;
+            float totalInertia = 4.0f;
 
             for (int i = 0; i < _loads.Count; i++)
             {
@@ -328,18 +375,18 @@ namespace Valhicle.Components
                 }
             }
 
-            float alphaRad = totalTorque / Mathf.Max(0.1f, totalInertia);
-            float alphaDeg = alphaRad * Mathf.Rad2Deg;
+            float alphaRad = totalTorque / Mathf.Max(3.5f, totalInertia);
+            float alphaDeg = Mathf.Clamp(alphaRad * Mathf.Rad2Deg, -4000f, 4000f);
 
             _omega += alphaDeg * dt;
-            _omega *= Mathf.Exp(-dt * 1.8f);
+            _omega *= Mathf.Exp(-dt * 6.0f);
 
             if (Mathf.Abs(_omega) < 0.2f && Mathf.Abs(totalTorque) < 0.5f)
             {
                 _omega = 0f;
             }
 
-            _omega = Mathf.Clamp(_omega, -1500f, 1500f);
+            _omega = Mathf.Clamp(_omega, -400f, 400f);
             CurrentAngle += _omega * dt;
         }
 
@@ -417,18 +464,22 @@ namespace Valhicle.Components
                 return;
             }
 
+            bool isShift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
             float delta = 0f;
             float coarseDelta = 0f;
 
             if (Input.GetKeyDown(KeyCode.LeftArrow))
             {
-                delta -= 1f;
+                if (isShift) coarseDelta -= 1f;
+                else delta -= 1f;
                 _arrowHoldTimer = 0f;
                 _arrowRepeatTimer = 0f;
             }
             else if (Input.GetKeyDown(KeyCode.RightArrow))
             {
-                delta += 1f;
+                if (isShift) coarseDelta += 1f;
+                else delta += 1f;
                 _arrowHoldTimer = 0f;
                 _arrowRepeatTimer = 0f;
             }
@@ -442,7 +493,9 @@ namespace Valhicle.Components
                     if (_arrowRepeatTimer >= repeatRate)
                     {
                         _arrowRepeatTimer = 0f;
-                        delta -= _arrowHoldTimer > 2.5f ? 4f : 1f;
+                        float step = _arrowHoldTimer > 2.5f ? 4f : 1f;
+                        if (isShift) coarseDelta -= step;
+                        else delta -= step;
                     }
                 }
             }
@@ -456,7 +509,9 @@ namespace Valhicle.Components
                     if (_arrowRepeatTimer >= repeatRate)
                     {
                         _arrowRepeatTimer = 0f;
-                        delta += _arrowHoldTimer > 2.5f ? 4f : 1f;
+                        float step = _arrowHoldTimer > 2.5f ? 4f : 1f;
+                        if (isShift) coarseDelta += step;
+                        else delta += step;
                     }
                 }
             }
@@ -466,8 +521,9 @@ namespace Valhicle.Components
                 _arrowRepeatTimer = 0f;
             }
 
-            if (Input.GetKeyDown(KeyCode.DownArrow)) coarseDelta -= 1f;
-            if (Input.GetKeyDown(KeyCode.UpArrow)) coarseDelta += 1f;
+            // Also support [ / ] and PageDown / PageUp for coarse / secondary adjustments
+            if (Input.GetKeyDown(KeyCode.LeftBracket) || Input.GetKeyDown(KeyCode.PageDown)) coarseDelta -= 1f;
+            if (Input.GetKeyDown(KeyCode.RightBracket) || Input.GetKeyDown(KeyCode.PageUp)) coarseDelta += 1f;
 
             if (Mathf.Abs(delta) < 0.001f && Mathf.Abs(coarseDelta) < 0.001f) return;
 
@@ -482,7 +538,7 @@ namespace Valhicle.Components
                     MotorSpeed = Mathf.Clamp(MotorSpeed + coarseDelta * 60f, 5f, 3600f);
                 }
                 SaveZdo();
-                player.Message(MessageHud.MessageType.Center, $"Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)");
+                player.Message(MessageHud.MessageType.Center, $"Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)");
             }
             else if (Mode == BearingMode.Steering)
             {
@@ -501,10 +557,14 @@ namespace Valhicle.Components
             }
             else if (Mode == BearingMode.FreeSpinning)
             {
-                if (Mathf.Abs(delta) > 0.001f)
+                if (Mathf.Abs(delta) > 0.001f || Mathf.Abs(coarseDelta) > 0.001f)
                 {
-                    _omega += delta * 60f;
-                    player.Message(MessageHud.MessageType.Center, "Bearing: Spun push");
+                    float step = Mathf.Abs(coarseDelta) > 0.001f ? coarseDelta * 15f : delta * 5f;
+                    FreeSpinLimit = Mathf.Clamp(FreeSpinLimit + step, 0f, 180f);
+                    if (FreeSpinLimit < 5f) FreeSpinLimit = 0f;
+                    SaveZdo();
+                    string desc = FreeSpinLimit > 1f ? $"±{FreeSpinLimit:0}° (Suspension Stop)" : "Continuous 360° (Wheels / Props)";
+                    player.Message(MessageHud.MessageType.Center, $"FreeSpin Range: {desc}");
                 }
             }
         }
@@ -514,7 +574,7 @@ namespace Valhicle.Components
             if (TextInput.instance == null) return;
             string prompt = Mode == BearingMode.Motorized
                 ? "Motor Speed (5 - 3600 °/s or e.g. '30 rpm')"
-                : "Steer Angle Limit (10 - 85°)";
+                : (Mode == BearingMode.Steering ? "Steer Angle Limit (10 - 85°)" : "FreeSpin Travel Range (0 = 360°, 10-180°)");
             TextInput.instance.RequestText(this, prompt, 12);
         }
 
@@ -560,7 +620,11 @@ namespace Valhicle.Components
             {
                 return ((int)MotorSpeed).ToString();
             }
-            return ((int)MaxSteerAngle).ToString();
+            if (Mode == BearingMode.Steering)
+            {
+                return ((int)MaxSteerAngle).ToString();
+            }
+            return ((int)FreeSpinLimit).ToString();
         }
 
         public void SetText(string text)
@@ -587,13 +651,21 @@ namespace Valhicle.Components
                     }
                     MotorSpeed = Mathf.Clamp(val, 5f, 3600f);
                     SaveZdo();
-                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)");
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)");
                 }
                 else if (Mode == BearingMode.Steering)
                 {
                     MaxSteerAngle = Mathf.Clamp(Mathf.Abs(val), 10f, 85f);
                     SaveZdo();
                     Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Steer Limit: {MaxSteerAngle:0}°");
+                }
+                else if (Mode == BearingMode.FreeSpinning)
+                {
+                    FreeSpinLimit = Mathf.Clamp(Mathf.Abs(val), 0f, 180f);
+                    if (FreeSpinLimit < 5f) FreeSpinLimit = 0f;
+                    SaveZdo();
+                    string desc = FreeSpinLimit > 1f ? $"±{FreeSpinLimit:0}° (Suspension Stop)" : "Continuous 360° (Wheels / Props)";
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing FreeSpin Range: {desc}");
                 }
             }
         }
@@ -613,6 +685,7 @@ namespace Valhicle.Components
             zdo.Set(GetZdoKey("MotorSpeed"), MotorSpeed);
             zdo.Set(GetZdoKey("SteerSpeed"), SteerSpeed);
             zdo.Set(GetZdoKey("CurAngle"), CurrentAngle);
+            zdo.Set(GetZdoKey("FreeSpinLimit"), FreeSpinLimit);
         }
 
         public bool UseItem(Humanoid user, ItemDrop.ItemData item) => false;
@@ -625,8 +698,8 @@ namespace Valhicle.Components
             {
                 return Localization.instance.Localize(
                     "<b>Mechanical Bearing (Motorized)</b>\n" +
-                    $"Speed: <color=yellow>{MotorSpeed:0}°/s ({MotorSpeed / 6f:0.1} RPM)</color>   Dir: {dirStr}\n" +
-                    "[<color=yellow><b>Left / Right arrows</b></color>] Speed (±15°/s)   [<color=yellow><b>Up / Down</b></color>] ±60°/s\n" +
+                    $"Speed: <color=yellow>{MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)</color>   Dir: {dirStr}\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Speed (±15°/s)   [<color=yellow><b>Shift + Arrows / [ ]</b></color>] ±60°/s\n" +
                     "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Set Speed   [<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse"
                 );
             }
@@ -635,15 +708,19 @@ namespace Valhicle.Components
                 return Localization.instance.Localize(
                     "<b>Mechanical Bearing (Steering)</b>\n" +
                     $"Limit: <color=yellow>{MaxSteerAngle:0}°</color>   Speed: <color=yellow>{SteerSpeed:0}°/s</color>   Dir: {dirStr}\n" +
-                    "[<color=yellow><b>Left / Right arrows</b></color>] Steer Limit   [<color=yellow><b>Up / Down</b></color>] Steer Speed\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Steer Limit (±5°)   [<color=yellow><b>Shift + Arrows / [ ]</b></color>] Steer Speed (±20°/s)\n" +
                     "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Set Angle   [<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse"
                 );
             }
             else
             {
+                string limitStr = FreeSpinLimit > 1f
+                    ? $"Travel: <color=yellow>±{FreeSpinLimit:0}° (Suspension Stop)</color>"
+                    : "Travel: <color=yellow>Continuous (360° / Wheel)</color>";
                 return Localization.instance.Localize(
                     "<b>Mechanical Bearing (Free Spinning)</b>\n" +
-                    "Mode: <color=yellow>Free Spinning (Physics)</color>\n" +
+                    $"{limitStr}\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Travel Limit (±5°, Shift ±15°)\n" +
                     "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Spin Push"
                 );
             }

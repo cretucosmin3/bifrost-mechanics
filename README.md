@@ -45,7 +45,7 @@ Valhicle/
 │   │   └── VehicleLift.cs          # 1.6m elevated building platform & lift
 │   ├── Components/
 │   │   ├── VehicleWheel.cs         # 3 sizes + toggleable spin direction
-│   │   ├── VehicleSuspension.cs    # 2 types + dynamic coiled metal spring compression
+│   │   ├── VehicleRope.cs          # 2-click dynamic catenary ropes with spring-damper tension
 │   │   ├── VehicleEngine.cs        # 2 steam engines + Coal fuel & smoke effects
 │   │   ├── VehicleSeat.cs          # Driver seat + animated steering wheel + IDoodadController
 │   │   └── VehicleBearing.cs       # Button swivel bearings (Steering, FreeSpinning, Motorized)
@@ -117,7 +117,7 @@ Ensure `devcommands` is active in the console:
 * `spawn valhicle_chassis`: Spawns a 2m x 2m vehicle chassis platform.
 * `spawn valhicle_seat`: Spawns the driver station with steering column.
 * `spawn valhicle_wheel_small` / `valhicle_wheel_medium` / `valhicle_wheel_large`: Spawns wheels.
-* `spawn valhicle_suspension_std` / `valhicle_suspension_hd`: Spawns coiled spring suspensions.
+* `spawn valhicle_rope`: Spawns rope tie-downs.
 * `spawn valhicle_bearing`: Spawns the button swivel bearing.
 * `spawn valhicle_engine_small` / `valhicle_engine_heavy`: Spawns steam engines.
 * `spawn valhicle_wrench`: Spawns the Mechanic's Wrench.

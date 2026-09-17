@@ -11,7 +11,6 @@ namespace Valhicle.Core
     {
         public VehicleCore ParentVehicle { get; private set; }
         public VehicleBearing AttachedBearing { get; private set; }
-        public VehicleSuspension AttachedSuspension { get; private set; }
         public Piece PieceComponent { get; private set; }
         public WearNTear WearNTearComponent { get; private set; }
 
@@ -21,6 +20,12 @@ namespace Valhicle.Core
 
         private void Awake()
         {
+            if (GetComponent<VehicleRope>() != null)
+            {
+                Destroy(this);
+                return;
+            }
+
             PieceComponent = GetComponent<Piece>();
             WearNTearComponent = GetComponent<WearNTear>();
             _nview = GetComponent<ZNetView>();
@@ -40,24 +45,33 @@ namespace Valhicle.Core
         private void Start()
         {
             if (VehicleUtil.IsPlacementGhost(gameObject)) return;
+
+            if (_nview == null) _nview = GetComponent<ZNetView>();
+            var zdo = _nview != null && _nview.IsValid() ? _nview.GetZDO() : null;
+            var parentId = zdo != null ? zdo.GetZDOID(VehicleUtil.ParentZdoKey) : ZDOID.None;
+            var bearingId = zdo != null ? zdo.GetZDOID(VehicleUtil.BearingZdoKey) : ZDOID.None;
+
+            if (parentId != ZDOID.None || bearingId != ZDOID.None)
+            {
+                StripStrayVehicleComponents();
+                InvokeRepeating(nameof(TryRestoreAttachment), 0.05f, 0.15f);
+                return;
+            }
+
             if (GetComponent<VehicleCore>() != null) return;
             if (GetComponent<VehicleLift>() != null) return;
-            InvokeRepeating(nameof(TryRestoreAttachment), 0.15f, 0.4f);
+
+            InvokeRepeating(nameof(TryRestoreAttachment), 0.05f, 0.15f);
         }
 
         public void OnPlaced()
         {
-            TryAttachFromWorld(null, null, false, false);
+            TryAttachFromWorld(null, false);
         }
 
-        public void OnPlaced(VehicleBearing targetBearing)
+        public void OnPlaced(VehicleBearing targetBearing, bool directHubHit = false)
         {
-            TryAttachFromWorld(targetBearing, null, false, false);
-        }
-
-        public void OnPlaced(VehicleBearing targetBearing, VehicleSuspension targetSuspension, bool directHubHit = false, bool directSuspHeadHit = false)
-        {
-            TryAttachFromWorld(targetBearing, targetSuspension, directHubHit, directSuspHeadHit);
+            TryAttachFromWorld(targetBearing, directHubHit);
         }
 
         private void TryRestoreAttachment()
@@ -73,23 +87,11 @@ namespace Valhicle.Core
             {
                 var parentId = _nview.GetZDO().GetZDOID(VehicleUtil.ParentZdoKey);
                 var bearingId = _nview.GetZDO().GetZDOID(VehicleUtil.BearingZdoKey);
-                var suspensionId = _nview.GetZDO().GetZDOID(VehicleUtil.SuspensionZdoKey);
 
-                if (parentId != ZDOID.None || bearingId != ZDOID.None || suspensionId != ZDOID.None)
+                if (parentId != ZDOID.None || bearingId != ZDOID.None)
                 {
                     GameObject parentGo = parentId != ZDOID.None ? VehicleUtil.FindByUid(parentId) : null;
                     VehicleCore core = parentGo != null ? (parentGo.GetComponent<VehicleCore>() ?? parentGo.GetComponentInParent<VehicleCore>()) : null;
-
-                    VehicleSuspension suspension = null;
-                    if (suspensionId != ZDOID.None)
-                    {
-                        var sGo = VehicleUtil.FindByUid(suspensionId);
-                        suspension = sGo != null ? sGo.GetComponent<VehicleSuspension>() : null;
-                        if (suspension == null && _restoreAttempts < 50)
-                        {
-                            return; // Wait for suspension to spawn
-                        }
-                    }
 
                     VehicleBearing bearing = null;
                     if (bearingId != ZDOID.None)
@@ -100,11 +102,6 @@ namespace Valhicle.Core
                         {
                             return; // Wait for bearing to spawn
                         }
-                    }
-
-                    if (suspension == null && parentGo != null)
-                    {
-                        suspension = parentGo.GetComponent<VehicleSuspension>() ?? parentGo.GetComponentInParent<VehicleSuspension>();
                     }
 
                     if (bearing == null && parentGo != null)
@@ -121,12 +118,12 @@ namespace Valhicle.Core
                         }
                     }
 
-                    if (parentId != ZDOID.None && core == null && bearing == null && suspension == null && _restoreAttempts < 50)
+                    if (parentId != ZDOID.None && core == null && bearing == null && _restoreAttempts < 50)
                     {
-                        return; // Wait for parent/core/suspension to spawn
+                        return; // Wait for parent/core to spawn
                     }
 
-                    if (core == null && bearing == null && suspension == null)
+                    if (core == null && bearing == null)
                     {
                         if (_restoreAttempts < 50) return;
                         CancelInvoke(nameof(TryRestoreAttachment));
@@ -136,11 +133,7 @@ namespace Valhicle.Core
                     Vector3 localPos = _nview.GetZDO().GetVec3(VehicleUtil.LocalPosZdoKey, transform.localPosition);
                     Quaternion localRot = _nview.GetZDO().GetQuaternion(VehicleUtil.LocalRotZdoKey, transform.localRotation);
 
-                    if (suspension != null)
-                    {
-                        AttachToSuspension(suspension, false);
-                    }
-                    else if (core != null)
+                    if (core != null)
                     {
                         AttachToVehicle(core, bearing, false);
                     }
@@ -152,11 +145,7 @@ namespace Valhicle.Core
                     transform.localPosition = localPos;
                     transform.localRotation = localRot;
                     VehicleUtil.ForceWorldScaleOne(transform);
-                    if (suspension != null)
-                    {
-                        suspension.UpdateLoadPose(transform);
-                    }
-                    else if (bearing != null)
+                    if (bearing != null)
                     {
                         bearing.UpdateLoadPose(transform);
                     }
@@ -172,13 +161,13 @@ namespace Valhicle.Core
             }
         }
 
-        public void TryAttachFromWorld(VehicleBearing targetBearing = null, VehicleSuspension targetSuspension = null, bool directHubHit = false, bool directSuspHeadHit = false)
+        public void TryAttachFromWorld(VehicleBearing targetBearing = null, bool directHubHit = false)
         {
-            if (GetComponent<VehicleLift>() != null) return;
+            if (VehicleUtil.PrefabName(gameObject) == "valhicle_lift") return;
+            if (GetComponent<VehicleRope>() != null) return;
 
             var selfCore = GetComponent<VehicleCore>();
             var selfBearing = GetComponent<VehicleBearing>();
-            var selfSuspension = GetComponent<VehicleSuspension>();
             var nearby = VehicleUtil.FindVehicleNear(transform.position, 8.0f, selfCore);
 
             if (nearby == null)
@@ -221,14 +210,8 @@ namespace Valhicle.Core
             {
                 if (nearby != null)
                 {
-                    var extraLift = GetComponent<VehicleLift>();
-                    var extraRb = GetComponent<Rigidbody>();
-                    var extraSync = GetComponent<ZSyncTransform>();
-                    DestroyImmediate(selfCore);
-                    if (extraLift != null) DestroyImmediate(extraLift);
-                    if (extraRb != null) DestroyImmediate(extraRb);
-                    if (extraSync != null) DestroyImmediate(extraSync);
-                    AttachToVehicle(nearby, null, true);
+                    StripStrayVehicleComponents(nearby);
+                    AttachToVehicle(nearby, targetBearing, true, directHubHit);
                 }
                 return;
             }
@@ -236,8 +219,15 @@ namespace Valhicle.Core
             bool isSeatOrEngine = GetComponent<VehicleSeat>() != null || GetComponent<VehicleEngine>() != null;
             bool isWheel = GetComponent<VehicleWheel>() != null;
 
-            if (selfBearing != null || selfSuspension != null)
+            if (selfBearing != null)
             {
+                if (targetBearing != null && targetBearing != selfBearing)
+                {
+                    var core = targetBearing.GetComponentInParent<VehicleCore>() ?? nearby;
+                    if (core != null) AttachToVehicle(core, targetBearing, true, directHubHit);
+                    else AttachToBearingOnly(targetBearing, true, directHubHit);
+                    return;
+                }
                 if (nearby != null) AttachToVehicle(nearby, null, true);
                 return;
             }
@@ -248,29 +238,15 @@ namespace Valhicle.Core
                 return;
             }
 
-            // Check explicit or nearby suspension
-            VehicleSuspension suspension = targetSuspension;
-            if (suspension == null)
-            {
-                suspension = FindSuspensionTouchingHead(0.20f, selfSuspension);
-                if (suspension != null) directSuspHeadHit = true;
-            }
-
-            if (suspension != null && !suspension.IsMountSupport(transform))
-            {
-                AttachToSuspension(suspension, true, directSuspHeadHit);
-                return;
-            }
-
             // Check explicit or nearby bearing
             VehicleBearing bearing = targetBearing;
             if (bearing == null)
             {
-                bearing = FindBearingTouchingHub(0.20f, selfBearing);
+                bearing = FindBearingTouchingHub(0.30f, selfBearing);
                 if (bearing != null) directHubHit = true;
             }
 
-            if (bearing != null && !bearing.IsMountSupport(transform))
+            if (bearing != null && (directHubHit || targetBearing == bearing || !bearing.IsMountSupport(transform)))
             {
                 var core = bearing.GetComponentInParent<VehicleCore>() ?? nearby;
                 if (core != null) AttachToVehicle(core, bearing, true, directHubHit);
@@ -282,56 +258,6 @@ namespace Valhicle.Core
             {
                 AttachToVehicle(nearby, null, true);
             }
-        }
-
-        private VehicleSuspension FindSuspensionTouchingHead(float maxDist, VehicleSuspension exclude)
-        {
-            var cols = Physics.OverlapSphere(transform.position, Mathf.Max(maxDist, 0.4f));
-            VehicleSuspension best = null;
-            float bestDist = float.MaxValue;
-            var myCols = GetComponentsInChildren<Collider>();
-
-            for (int i = 0; i < cols.Length; i++)
-            {
-                if (cols[i] == null) continue;
-                var s = cols[i].GetComponentInParent<VehicleSuspension>();
-                if (s == null || s == exclude || s.transform == transform) continue;
-                Transform head = s.MovingHead != null ? s.MovingHead : s.transform;
-                Vector3 headPos = head.position + s.transform.up * (s.RestLength * 0.42f);
-
-                Vector3 checkPoint = transform.position;
-                if (myCols != null && myCols.Length > 0)
-                {
-                    float minColDist = float.MaxValue;
-                    for (int c = 0; c < myCols.Length; c++)
-                    {
-                        if (myCols[c] == null || myCols[c].isTrigger) continue;
-                        Vector3 cp = myCols[c].ClosestPoint(headPos);
-                        float cd = Vector3.Distance(headPos, cp);
-                        if (cd < minColDist)
-                        {
-                            minColDist = cd;
-                            checkPoint = cp;
-                        }
-                    }
-                }
-
-                // Must be on the top head side (+up)
-                Vector3 toTransform = checkPoint - s.transform.position;
-                float projUp = Vector3.Dot(toTransform, s.transform.up);
-                if (projUp < s.RestLength * 0.20f) continue; // Lower half or base bracket
-
-                Vector3 radial = toTransform - s.transform.up * projUp;
-                if (radial.magnitude > 0.22f) continue;
-
-                float d = Vector3.Distance(headPos, checkPoint);
-                if (d < maxDist && d < bestDist)
-                {
-                    bestDist = d;
-                    best = s;
-                }
-            }
-            return best;
         }
 
         private VehicleBearing FindBearingTouchingHub(float maxDist, VehicleBearing exclude)
@@ -421,72 +347,38 @@ namespace Valhicle.Core
             return best;
         }
 
-        public void AttachToSuspension(VehicleSuspension suspension, bool writeZdo = true, bool snapToSuspension = false)
+        public void StripStrayVehicleComponents(VehicleCore exceptCore = null)
         {
-            if (suspension == null || suspension.MovingHead == null) return;
-            if (transform == suspension.transform) return;
-
-            AttachedSuspension = suspension;
-            ParentVehicle = suspension.GetComponentInParent<VehicleCore>();
-
-            suspension.RegisterAttachment(transform);
-
-            if (writeZdo && GetComponent<VehicleWheel>() != null)
-            {
-                if (snapToSuspension)
-                {
-                    VehiclePlacement.SnapWheelToSuspension(transform, suspension);
-                }
-                suspension.UpdateLoadPose(transform);
-            }
-
             var childCore = GetComponent<VehicleCore>();
-            if (childCore != null && childCore != ParentVehicle)
+            if (childCore != null && childCore != exceptCore)
             {
                 DestroyImmediate(childCore);
             }
+            var childLift = GetComponent<VehicleLift>();
+            if (childLift != null)
+            {
+                DestroyImmediate(childLift);
+            }
             var childRb = GetComponent<Rigidbody>();
-            if (childRb != null && (ParentVehicle == null || childRb != ParentVehicle.Rb))
+            if (childRb != null && (exceptCore == null || childRb != exceptCore.Rb))
             {
                 DestroyImmediate(childRb);
             }
-
-            if (WearNTearComponent != null)
+            foreach (var sync in GetComponentsInChildren<ZSyncTransform>(true))
             {
-                WearNTearComponent.m_noRoofWear = true;
-                WearNTearComponent.m_snowDamageImmune = true;
-                WearNTearComponent.m_snow = null;
-                WearNTearComponent.m_snowWorn = null;
-                WearNTearComponent.m_snowBroken = null;
-                WearNTearComponent.m_noSupportWear = true;
-                WearNTearComponent.m_supports = true;
-            }
-
-            foreach (var col in GetComponentsInChildren<Collider>(true))
-            {
-                if (col != null && !col.isTrigger)
+                if (sync != null && (exceptCore == null || sync.gameObject != exceptCore.gameObject))
                 {
-                    col.sharedMaterial = VehicleUtil.SmoothPhysicMaterial;
+                    DestroyImmediate(sync);
                 }
             }
-
-            if (ParentVehicle != null)
-            {
-                ParentVehicle.RegisterPiece(this);
-            }
-
-            if (writeZdo)
-            {
-                PersistAttachment(ParentVehicle, null, suspension);
-            }
-
-            Plugin.Log.LogInfo($"Attached '{name}' to suspension '{suspension.name}'");
         }
 
         public void AttachToBearingOnly(VehicleBearing bearing, bool writeZdo, bool snapToBearing = false)
         {
             if (bearing == null || bearing.RotatingHead == null) return;
             if (transform == bearing.transform) return;
+
+            StripStrayVehicleComponents(null);
 
             AttachedBearing = bearing;
             bearing.RegisterAttachment(transform);
@@ -509,6 +401,9 @@ namespace Valhicle.Core
         {
             if (vehicle == null) return;
             if (transform == vehicle.transform) return;
+
+            // Child pieces must not simulate as separate bodies or fight parent sync.
+            StripStrayVehicleComponents(vehicle);
 
             ParentVehicle = vehicle;
             AttachedBearing = bearing;
@@ -533,24 +428,6 @@ namespace Valhicle.Core
                 bearing.UpdateLoadPose(transform);
             }
 
-            // Child pieces must not simulate as separate bodies or fight parent sync.
-            var childCore = GetComponent<VehicleCore>();
-            if (childCore != null && childCore != vehicle)
-            {
-                DestroyImmediate(childCore);
-            }
-            var childRb = GetComponent<Rigidbody>();
-            if (childRb != null && childRb != vehicle.Rb)
-            {
-                DestroyImmediate(childRb);
-            }
-            foreach (var sync in GetComponentsInChildren<ZSyncTransform>(true))
-            {
-                if (sync != null && sync.gameObject != vehicle.gameObject)
-                {
-                    DestroyImmediate(sync);
-                }
-            }
             VehicleUtil.StripSnowOverlays(gameObject);
 
             if (WearNTearComponent != null)
@@ -582,16 +459,15 @@ namespace Valhicle.Core
             Plugin.Log.LogInfo($"Attached '{name}' to vehicle '{vehicle.name}' parent='{parent.name}'");
         }
 
-        private void PersistAttachment(VehicleCore vehicle, VehicleBearing bearing, VehicleSuspension suspension = null)
+        private void PersistAttachment(VehicleCore vehicle, VehicleBearing bearing)
         {
             if (_nview == null) _nview = GetComponent<ZNetView>();
             if (_nview == null || !_nview.IsValid()) return;
 
             var zdo = _nview.GetZDO();
-            ZDOID parentId = vehicle != null ? VehicleUtil.GetUid(vehicle) : (bearing != null ? VehicleUtil.GetUid(bearing) : (suspension != null ? VehicleUtil.GetUid(suspension) : ZDOID.None));
+            ZDOID parentId = vehicle != null ? VehicleUtil.GetUid(vehicle) : (bearing != null ? VehicleUtil.GetUid(bearing) : ZDOID.None);
             zdo.Set(VehicleUtil.ParentZdoKey, parentId);
             zdo.Set(VehicleUtil.BearingZdoKey, bearing != null ? VehicleUtil.GetUid(bearing) : ZDOID.None);
-            zdo.Set(VehicleUtil.SuspensionZdoKey, suspension != null ? VehicleUtil.GetUid(suspension) : ZDOID.None);
             zdo.SetPosition(transform.position);
             zdo.SetRotation(transform.rotation);
             zdo.Set(VehicleUtil.LocalPosZdoKey, transform.localPosition);
@@ -622,11 +498,6 @@ namespace Valhicle.Core
 
         public void DetachFromVehicle()
         {
-            if (AttachedSuspension != null)
-            {
-                AttachedSuspension.UnregisterAttachment(transform);
-                AttachedSuspension = null;
-            }
             if (AttachedBearing != null)
             {
                 AttachedBearing.UnregisterAttachment(transform);

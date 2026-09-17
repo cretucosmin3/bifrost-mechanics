@@ -25,38 +25,79 @@ namespace Valhicle.Patches
             VehicleUtil.MakePlacedPieceReal(placed.gameObject);
 
             var lift = placed.GetComponent<VehicleLift>();
-            if (lift != null)
+            if (lift != null && VehicleUtil.PrefabName(placed.gameObject) == "valhicle_lift")
             {
                 lift.OnPlaced();
                 return;
             }
 
+            var rope = placed.GetComponent<VehicleRope>();
+            if (rope != null)
+            {
+                if (VehicleRope.ActivePendingRope == null)
+                {
+                    rope.InitAnchorA(pos, LastHitCollider, LastHitPoint);
+                    VehicleRope.ActivePendingRope = rope;
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, "Rope Anchor A set! Click point B to tie down.");
+                    return;
+                }
+                else
+                {
+                    var active = VehicleRope.ActivePendingRope;
+                    active.InitAnchorB(pos, LastHitCollider, LastHitPoint);
+                    VehicleRope.ActivePendingRope = null;
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Rope secured! Span: {active.RestLength:0.00}m ([E] Stiff/Elastic, [L] Length)");
+
+                    // Refund materials consumed for piece B so a rope costs 1 placement
+                    var pieceComp = placed.GetComponent<Piece>();
+                    if (pieceComp != null && pieceComp.m_resources != null && Player.m_localPlayer != null)
+                    {
+                        foreach (var req in pieceComp.m_resources)
+                        {
+                            if (req != null && req.m_resItem != null && req.m_amount > 0)
+                            {
+                                Player.m_localPlayer.GetInventory()?.AddItem(req.m_resItem.gameObject, req.m_amount);
+                            }
+                        }
+                    }
+
+                    var nv = placed.GetComponent<ZNetView>();
+                    if (nv != null && nv.IsValid())
+                    {
+                        nv.ClaimOwnership();
+                        ZNetScene.instance?.Destroy(placed.gameObject);
+                    }
+                    else
+                    {
+                        UnityEngine.Object.Destroy(placed.gameObject);
+                    }
+                    return;
+                }
+            }
+
             var vp = placed.GetComponent<VehiclePiece>() ?? placed.gameObject.AddComponent<VehiclePiece>();
             VehicleBearing targetBearing = null;
-            VehicleSuspension targetSuspension = null;
-
             bool directHubHit = false;
-            bool directSuspHeadHit = false;
 
             if (LastHitCollider != null 
                 && Time.time - LastHitTime < 0.8f 
                 && Vector3.Distance(placed.transform.position, LastHitPoint) < 2.2f)
             {
                 var bearingCandidate = LastHitCollider.GetComponentInParent<VehicleBearing>();
-                if (bearingCandidate != null && bearingCandidate.IsHubTarget(LastHitPoint, LastHitCollider))
+                if (bearingCandidate != null)
                 {
-                    targetBearing = bearingCandidate;
-                    directHubHit = true;
+                    if (bearingCandidate.IsHubTarget(LastHitPoint, LastHitCollider))
+                    {
+                        targetBearing = bearingCandidate;
+                        directHubHit = true;
+                    }
+                    else if (bearingCandidate.Owns(LastHitCollider.transform))
+                    {
+                        targetBearing = bearingCandidate;
+                    }
                 }
 
-                var suspCandidate = LastHitCollider.GetComponentInParent<VehicleSuspension>();
-                if (suspCandidate != null && suspCandidate.IsHeadTarget(LastHitPoint, LastHitCollider))
-                {
-                    targetSuspension = suspCandidate;
-                    directSuspHeadHit = true;
-                }
-
-                if (targetBearing == null && targetSuspension == null)
+                if (targetBearing == null)
                 {
                     var hitPiece = LastHitCollider.GetComponentInParent<VehiclePiece>();
                     if (hitPiece != null)
@@ -65,14 +106,10 @@ namespace Valhicle.Patches
                         {
                             targetBearing = hitPiece.AttachedBearing;
                         }
-                        if (hitPiece.AttachedSuspension != null && hitPiece.AttachedSuspension.Owns(hitPiece.transform))
-                        {
-                            targetSuspension = hitPiece.AttachedSuspension;
-                        }
                     }
                 }
             }
-            vp.OnPlaced(targetBearing, targetSuspension, directHubHit, directSuspHeadHit);
+            vp.OnPlaced(targetBearing, directHubHit);
         }
 
         private static Piece FindPlacedInstance(Piece prefab, Vector3 pos)
@@ -115,10 +152,13 @@ namespace Valhicle.Patches
             return best;
         }
 
+        public static GameObject CurrentPlacementGhost { get; private set; }
+
         [HarmonyPatch("UpdatePlacementGhost")]
         [HarmonyPostfix]
         public static void UpdatePlacementGhostPostfix(Player __instance, GameObject ___m_placementGhost)
         {
+            CurrentPlacementGhost = ___m_placementGhost;
             if (___m_placementGhost == null) return;
 
             if (VehiclePlacement.IsVehicleBuildPiece(___m_placementGhost))
@@ -185,7 +225,7 @@ namespace Valhicle.Patches
             return col.GetComponentInParent<VehicleLift>() != null
                 || col.GetComponentInParent<VehicleCore>() != null
                 || col.GetComponentInParent<VehicleBearing>() != null
-                || col.GetComponentInParent<VehicleSuspension>() != null
+                || col.GetComponentInParent<VehicleRope>() != null
                 || col.GetComponentInParent<VehiclePiece>() != null;
         }
     }

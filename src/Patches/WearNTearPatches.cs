@@ -15,9 +15,11 @@ namespace Valhicle.Patches
                 || wnt.GetComponent<VehicleLift>() != null
                 || wnt.GetComponent<VehicleCore>() != null
                 || wnt.GetComponent<VehicleBearing>() != null
+                || wnt.GetComponent<VehicleRope>() != null
                 || wnt.GetComponentInParent<VehicleCore>() != null
                 || wnt.GetComponentInParent<VehicleLift>() != null
-                || wnt.GetComponentInParent<VehicleBearing>() != null)
+                || wnt.GetComponentInParent<VehicleBearing>() != null
+                || wnt.GetComponentInParent<VehicleRope>() != null)
             {
                 return true;
             }

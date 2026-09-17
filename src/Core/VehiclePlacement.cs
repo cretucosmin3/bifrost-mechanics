@@ -20,12 +20,23 @@ namespace Valhicle.Core
             string n = VehicleUtil.PrefabName(ghost);
             return n.StartsWith("valhicle_bearing")
                 || n.StartsWith("valhicle_wheel")
-                || n.StartsWith("valhicle_suspension");
+                || n.StartsWith("valhicle_rope");
         }
 
         public static bool TryUpdateGhost(Player player, GameObject ghost)
         {
             if (player == null || ghost == null) return false;
+
+            if (VehicleRope.ActivePendingRope != null)
+            {
+                if (!player.InPlaceMode() || ghost.GetComponent<VehicleRope>() == null)
+                {
+                    UnityEngine.Object.Destroy(VehicleRope.ActivePendingRope.gameObject);
+                    VehicleRope.ActivePendingRope = null;
+                    player.Message(MessageHud.MessageType.Center, "Rope placement cancelled.");
+                }
+            }
+
             if (!IsVehicleBuildPiece(ghost)) return false;
 
             if (!TryRaycast(player, ghost, out RaycastHit hit))
@@ -35,20 +46,13 @@ namespace Valhicle.Core
             var bearing = hit.collider.GetComponentInParent<VehicleBearing>();
             bool hubAim = bearing != null && bearing.IsHubTarget(hit.point, hit.collider);
 
-            var suspension = hit.collider.GetComponentInParent<VehicleSuspension>();
-            bool suspAim = suspension != null && suspension.IsHeadTarget(hit.point, hit.collider);
-
             bool isWheel = ghost.GetComponent<VehicleWheel>() != null;
             bool isBearing = ghost.GetComponent<VehicleBearing>() != null;
-            bool isSuspension = ghost.GetComponent<VehicleSuspension>() != null;
+            bool isRope = ghost.GetComponent<VehicleRope>() != null;
 
             if (isWheel && hubAim)
             {
                 ApplyWheelOnBearing(ghost.transform, bearing, twist);
-            }
-            else if (isWheel && suspAim)
-            {
-                ApplyWheelOnSuspension(ghost.transform, suspension, twist);
             }
             else if (isWheel)
             {
@@ -58,9 +62,29 @@ namespace Valhicle.Core
             {
                 ApplyBearingOnSurface(ghost.transform, hit.point, hit.normal, twist);
             }
-            else if (isSuspension)
+            else if (isRope)
             {
-                ApplyStrutOnSurface(ghost.transform, hit.point, hit.normal, twist);
+                ApplyRopeOnSurface(ghost.transform, hit.point, hit.normal);
+                var ghostRope = ghost.GetComponent<VehicleRope>();
+                if (ghostRope != null)
+                {
+                    ghostRope.EnsureVisuals();
+                    if (VehicleRope.ActivePendingRope != null)
+                    {
+                        Vector3 posA = VehicleRope.ActivePendingRope.GetAnchorAPosition();
+                        Vector3 posB = hit.point;
+                        if (ghostRope.RopeLine != null)
+                        {
+                            ghostRope.RopeLine.positionCount = 2;
+                            ghostRope.RopeLine.SetPosition(0, posA);
+                            ghostRope.RopeLine.SetPosition(1, posB);
+                        }
+                    }
+                    else if (ghostRope.RopeLine != null)
+                    {
+                        ghostRope.RopeLine.positionCount = 0;
+                    }
+                }
             }
             else
             {
@@ -83,26 +107,6 @@ namespace Valhicle.Core
             ApplyWheelOnBearing(wheel, bearing, 0f);
         }
 
-        public static void SnapWheelToSuspension(Transform wheel, VehicleSuspension suspension)
-        {
-            if (wheel == null || suspension == null) return;
-            Transform head = suspension.MovingHead != null ? suspension.MovingHead : suspension.transform;
-            VehicleUtil.ParentKeepWorld(wheel, head, true);
-            ApplyWheelOnSuspension(wheel, suspension, 0f);
-        }
-
-        private static void ApplyWheelOnSuspension(Transform wheel, VehicleSuspension suspension, float twist)
-        {
-            Transform head = suspension.MovingHead != null ? suspension.MovingHead : suspension.transform;
-            var core = suspension.GetComponentInParent<VehicleCore>();
-            Vector3 refRight = core != null ? core.transform.right : suspension.transform.right;
-            Vector3 axle = Quaternion.AngleAxis(twist, suspension.transform.up) * refRight;
-
-            wheel.rotation = RotationWithRight(axle, 0f);
-            float topOffset = suspension.RestLength * 0.42f;
-            wheel.position = suspension.transform.position + suspension.transform.up * topOffset;
-        }
-
         private static void ApplyBearingOnSurface(Transform t, Vector3 point, Vector3 normal, float twist)
         {
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
@@ -111,13 +115,11 @@ namespace Valhicle.Core
             t.localScale = Vector3.one;
         }
 
-        private static void ApplyStrutOnSurface(Transform t, Vector3 point, Vector3 normal, float twist)
+        private static void ApplyRopeOnSurface(Transform t, Vector3 point, Vector3 normal)
         {
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
-            var susp = t.GetComponent<VehicleSuspension>();
-            float halfHeight = (susp != null ? susp.RestLength : 0.70f) * 0.42f + 0.02f;
-            t.rotation = RotationWithUp(n, twist);
-            t.position = point + n * halfHeight;
+            t.rotation = RotationWithUp(n, 0f);
+            t.position = point + n * 0.01f;
             t.localScale = Vector3.one;
         }
 

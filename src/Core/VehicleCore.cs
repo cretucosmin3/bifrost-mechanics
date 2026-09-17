@@ -15,7 +15,6 @@ namespace Valhicle.Core
 
         public readonly List<VehicleWheel> Wheels = new List<VehicleWheel>();
         public readonly List<VehicleEngine> Engines = new List<VehicleEngine>();
-        public readonly List<VehicleSuspension> Suspensions = new List<VehicleSuspension>();
         public readonly List<VehicleBearing> Bearings = new List<VehicleBearing>();
         public readonly List<VehicleSeat> Seats = new List<VehicleSeat>();
         public readonly List<VehiclePiece> Pieces = new List<VehiclePiece>();
@@ -27,6 +26,7 @@ namespace Valhicle.Core
 
         private float _zdoSyncTimer;
         private float _settleTimer;
+        private float _loadSettleTimer = 0.8f;
 
         private void Awake()
         {
@@ -52,7 +52,9 @@ namespace Valhicle.Core
             Rb.interpolation = RigidbodyInterpolation.Interpolate;
             Rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             Rb.centerOfMass = new Vector3(0f, CenterOfMassOffset, 0f);
-            Rb.useGravity = true;
+            Rb.isKinematic = true;
+            Rb.useGravity = false;
+            _loadSettleTimer = 0.8f;
 
             EnsureSyncTransform();
             ScanChildComponents();
@@ -75,9 +77,6 @@ namespace Valhicle.Core
 
             Engines.Clear();
             Engines.AddRange(GetComponentsInChildren<VehicleEngine>(true));
-
-            Suspensions.Clear();
-            Suspensions.AddRange(GetComponentsInChildren<VehicleSuspension>(true));
 
             Bearings.Clear();
             Bearings.AddRange(GetComponentsInChildren<VehicleBearing>(true));
@@ -165,14 +164,24 @@ namespace Valhicle.Core
             StripStrayBodies();
             if (Rb == null) Rb = GetComponent<Rigidbody>() ?? gameObject.AddComponent<Rigidbody>();
             Rb.detectCollisions = true;
-            Rb.isKinematic = false;
-            Rb.useGravity = true;
             Rb.linearVelocity = Vector3.zero;
             Rb.angularVelocity = Vector3.zero;
-            ApplySyncBodyFlags(kinematic: false);
-            _settleTimer = 0.45f;
-            Physics.SyncTransforms();
-            Rb.WakeUp();
+
+            if (_loadSettleTimer <= 0f)
+            {
+                Rb.isKinematic = false;
+                Rb.useGravity = true;
+                ApplySyncBodyFlags(kinematic: false);
+                _settleTimer = 0.45f;
+                Physics.SyncTransforms();
+                Rb.WakeUp();
+            }
+            else
+            {
+                Rb.isKinematic = true;
+                Rb.useGravity = false;
+                ApplySyncBodyFlags(kinematic: true);
+            }
         }
 
         private void ApplySyncBodyFlags(bool kinematic)
@@ -219,15 +228,35 @@ namespace Valhicle.Core
                 return;
             }
 
+            if (_loadSettleTimer > 0f)
+            {
+                _loadSettleTimer -= Time.fixedDeltaTime;
+                Rb.isKinematic = true;
+                Rb.useGravity = false;
+                Rb.linearVelocity = Vector3.zero;
+                Rb.angularVelocity = Vector3.zero;
+                if (_loadSettleTimer <= 0f)
+                {
+                    ScanChildComponents();
+                    Rb.isKinematic = false;
+                    Rb.useGravity = true;
+                    ApplySyncBodyFlags(kinematic: false);
+                    _settleTimer = 0.45f;
+                    Physics.SyncTransforms();
+                    Rb.WakeUp();
+                }
+                return;
+            }
+
             Rb.isKinematic = false;
             Rb.useGravity = true;
 
             if (_settleTimer > 0f)
             {
                 _settleTimer -= Time.fixedDeltaTime;
-                Rb.linearVelocity = Vector3.Project(Rb.linearVelocity, Vector3.down);
-                Rb.angularVelocity *= 0.5f;
-                return;
+                Rb.linearVelocity = Vector3.Project(Rb.linearVelocity, Vector3.down) + Vector3.ProjectOnPlane(Rb.linearVelocity, Vector3.down) * 0.5f;
+                Rb.angularVelocity *= 0.8f;
+                // DO NOT return early: allow wheel suspension forces to catch and stabilize the vehicle!
             }
 
             VehicleSeat activeSeat = GetSteerSeat();
@@ -318,11 +347,6 @@ namespace Valhicle.Core
             for (int i = 0; i < Bearings.Count; i++)
             {
                 if (Bearings[i] != null) Bearings[i].SyncZdo();
-            }
-
-            for (int i = 0; i < Suspensions.Count; i++)
-            {
-                if (Suspensions[i] != null) Suspensions[i].SyncZdo();
             }
 
             for (int i = 0; i < Pieces.Count; i++)

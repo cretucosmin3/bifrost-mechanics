@@ -29,7 +29,7 @@ Valhicle/
 │   │   └── VehicleLift.cs          # Elevated 1.6m building lift (10 Wood, 1 Surtling Core)
 │   ├── Components/
 │   │   ├── VehicleWheel.cs         # Wheel sizes (Small, Medium, Large) + directional spin toggle [E]
-│   │   ├── VehicleSuspension.cs    # Dynamic 3D coiled metal springs with real-time compression/stretch
+│   │   ├── VehicleRope.cs          # 2-click dynamic catenary ropes with spring-damper tension & stretch modes
 │   │   ├── VehicleEngine.cs        # Small & Heavy steam boilers; burns Coal, emits smoke & feeds torque
 │   │   ├── VehicleSeat.cs          # Driver chair + steering column + IDoodadController input capture
 │   │   └── VehicleBearing.cs       # Button-shaped swivel bearing (Steering, FreeSpinning, Motorized)
@@ -96,10 +96,12 @@ Valhicle/
   - `moveDir.z` controls throttle, `moveDir.x` controls steering, and `block / Space` controls brakes.
   - The player remains seated and animated without accidental dismounting.
 
-### 3.5. Suspensions & Bearings
-* **Dynamic Springs (`VehicleSuspension.cs`)**:
-  - Clones the authentic 3D coiled helical metal spring mesh from the Dvergr `MechanicalSpring` (`item_mechanicalspring`).
-  - `UpdateVisuals(compressionRatio)` scales `SpringMeshTransform.localScale.y` in real-time, compressing and stretching the spring over bumps.
+### 3.5. Ropes & Bearings
+* **Rope Tie-Downs (`VehicleRope.cs`)**:
+  - Two-click placement system (Anchor A on first surface, Anchor B on second surface).
+  - Dynamic visual cable rendering using catenary sag calculations when slack, and straight taut rendering under tension.
+  - Realistic spring-damper tension physics (`FixedUpdate`) applying reciprocal forces between attached rigidbodies or static anchor points.
+  - Configurable stretch stiffness presets: **Rigid** (tight tie-down/tether), **Bungee** (elastic suspension/damping), and **Winch** (high-pull towing).
 * **Button Swivel Bearings (`VehicleBearing.cs`)**:
   - Designed as a compact, sleek circular mechanical button puck (outer housing radius 0.22m, raised center button radius 0.18m with directional indicator notch).
   - Modes:
@@ -142,7 +144,7 @@ Accessible via the Valheim in-game console (**F5**) when `devcommands` is active
 * `spawn valhicle_chassis`: Spawns the 2m x 2m modular chassis platform.
 * `spawn valhicle_seat`: Spawns the driver station.
 * `spawn valhicle_wheel_small` / `valhicle_wheel_medium` / `valhicle_wheel_large`: Spawns modular wheels.
-* `spawn valhicle_suspension_std` / `valhicle_suspension_hd`: Spawns dynamic spring suspensions.
+* `spawn valhicle_rope`: Spawns rope tie-downs.
 * `spawn valhicle_bearing`: Spawns the button swivel bearing.
 * `spawn valhicle_engine_small` / `valhicle_engine_heavy`: Spawns coal-burning steam engines.
 * `spawn valhicle_wrench`: Spawns the Mechanic's Wrench.

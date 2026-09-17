@@ -233,6 +233,12 @@ namespace Valhicle.Core
             if (Vector3.Distance(Player.m_localPlayer.transform.position, transform.position) > 10f) return;
             if (!IsClosestToLocalPlayer()) return;
 
+            var hover = Player.m_localPlayer.GetHoverObject();
+            if (hover != null && (hover.GetComponentInParent<Valhicle.Components.VehicleBearing>() != null || hover.GetComponentInParent<Valhicle.Components.VehicleRope>() != null))
+            {
+                return;
+            }
+
             float dir = 0f;
             if (Input.GetKey(KeyCode.UpArrow)) dir += 1f;
             if (Input.GetKey(KeyCode.DownArrow)) dir -= 1f;

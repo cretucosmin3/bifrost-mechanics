@@ -194,13 +194,21 @@ namespace Valhicle.Patches
 
             var parentId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.ParentZdoKey);
             var bearingId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.BearingZdoKey);
-            var suspensionId = zdo.GetZDOID(Valhicle.Core.VehicleUtil.SuspensionZdoKey);
-            if (parentId != ZDOID.None || bearingId != ZDOID.None || suspensionId != ZDOID.None)
+            if (parentId != ZDOID.None || bearingId != ZDOID.None)
             {
                 if (__instance.GetComponent<Valhicle.Core.VehiclePiece>() == null)
                 {
                     __instance.gameObject.AddComponent<Valhicle.Core.VehiclePiece>();
                 }
+                var strayCore = __instance.GetComponent<Valhicle.Core.VehicleCore>();
+                if (strayCore != null) UnityEngine.Object.DestroyImmediate(strayCore);
+                var strayLift = __instance.GetComponent<Valhicle.Core.VehicleLift>();
+                if (strayLift != null) UnityEngine.Object.DestroyImmediate(strayLift);
+                var strayRb = __instance.GetComponent<Rigidbody>();
+                if (strayRb != null) UnityEngine.Object.DestroyImmediate(strayRb);
+                var straySync = __instance.GetComponent<ZSyncTransform>();
+                if (straySync != null) UnityEngine.Object.DestroyImmediate(straySync);
+
                 var wnt = __instance.GetComponent<WearNTear>();
                 if (wnt != null)
                 {

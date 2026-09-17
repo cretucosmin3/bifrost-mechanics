@@ -21,9 +21,17 @@ namespace Valhicle.Prefabs
         private static Material _bronzeMaterial;
         private static Material _darkWoodMaterial;
 
+        public static Material IronMaterial => _ironMaterial;
+        public static Material BronzeMaterial => _bronzeMaterial;
+        public static Material DarkWoodMaterial => _darkWoodMaterial;
+        public static Material WoodMaterial => _woodMaterial;
+
+        private static readonly Dictionary<string, Sprite> _iconCache = new Dictionary<string, Sprite>(StringComparer.OrdinalIgnoreCase);
+
         public static void Reset()
         {
             _isRegistered = false;
+            _iconCache.Clear();
         }
 
         public static void RegisterAllPrefabs()
@@ -95,13 +103,11 @@ namespace Valhicle.Prefabs
                 CreateWheelPrefab(wheelSource, WheelSize.Large, "valhicle_wheel_large", "Cart Wheel (Large)", 1.00f,
                     new[] { Req("FineWood", 12), Req("IronNails", 6) });
 
-                CreateSuspensionPrefab(springItem, SuspensionType.Standard, "valhicle_suspension_std", "Vehicle Suspension (Standard)",
-                    new[] { Req("Wood", 4), Req("Iron", 2) });
-                CreateSuspensionPrefab(springItem, SuspensionType.HeavyDuty, "valhicle_suspension_hd", "Vehicle Suspension (Heavy-Duty)",
-                    new[] { Req("Iron", 4), Req("Bronze", 2) });
-
                 CreateButtonBearingPrefab("valhicle_bearing", "Mechanical Bearing (Swivel)",
                     new[] { Req("Bronze", 2), Req("FineWood", 2) });
+
+                CreateRopePrefab("valhicle_rope", "Rope Tie-Down",
+                    new[] { Req("LeatherScraps", 2), Req("BronzeNails", 1) });
 
                 CreateSeatPrefab(chairPrefab, wheelSource, "valhicle_seat", "Driver Seat & Steering Wheel",
                     new[] { Req("FineWood", 6), Req("DeerHide", 2), Req("Bronze", 2) });
@@ -170,6 +176,104 @@ namespace Valhicle.Prefabs
                     return child.gameObject;
                 }
             }
+
+            return null;
+        }
+
+        public static Sprite FindIcon(params string[] candidates)
+        {
+            if (candidates == null) return null;
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                string name = candidates[i];
+                if (string.IsNullOrEmpty(name)) continue;
+
+                if (_iconCache.TryGetValue(name, out var cached) && cached != null)
+                {
+                    return cached;
+                }
+
+                // 1. Check ObjectDB (items)
+                if (ObjectDB.instance != null)
+                {
+                    var go = ObjectDB.instance.GetItemPrefab(name);
+                    if (go != null)
+                    {
+                        var itemDrop = go.GetComponent<ItemDrop>();
+                        if (itemDrop != null && itemDrop.m_itemData?.m_shared?.m_icons != null && itemDrop.m_itemData.m_shared.m_icons.Length > 0)
+                        {
+                            var sp = itemDrop.m_itemData.m_shared.m_icons[0];
+                            if (sp != null)
+                            {
+                                _iconCache[name] = sp;
+                                return sp;
+                            }
+                        }
+                        var p = go.GetComponent<Piece>();
+                        if (p != null && p.m_icon != null)
+                        {
+                            _iconCache[name] = p.m_icon;
+                            return p.m_icon;
+                        }
+                    }
+                }
+
+                // 2. Check ZNetScene (pieces / world prefabs)
+                if (ZNetScene.instance != null)
+                {
+                    var go = ZNetScene.instance.GetPrefab(name);
+                    if (go != null)
+                    {
+                        var p = go.GetComponent<Piece>();
+                        if (p != null && p.m_icon != null)
+                        {
+                            _iconCache[name] = p.m_icon;
+                            return p.m_icon;
+                        }
+
+                        var itemDrop = go.GetComponent<ItemDrop>();
+                        if (itemDrop != null && itemDrop.m_itemData?.m_shared?.m_icons != null && itemDrop.m_itemData.m_shared.m_icons.Length > 0)
+                        {
+                            var sp = itemDrop.m_itemData.m_shared.m_icons[0];
+                            if (sp != null)
+                            {
+                                _iconCache[name] = sp;
+                                return sp;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback: Search loaded Sprite objects in Unity Resources
+            try
+            {
+                var allSprites = Resources.FindObjectsOfTypeAll<Sprite>();
+                if (allSprites != null && allSprites.Length > 0)
+                {
+                    for (int i = 0; i < candidates.Length; i++)
+                    {
+                        string name = candidates[i];
+                        if (string.IsNullOrEmpty(name)) continue;
+                        string cleanName = name.Replace("piece_", "").Replace("item_", "");
+
+                        for (int s = 0; s < allSprites.Length; s++)
+                        {
+                            var sp = allSprites[s];
+                            if (sp == null) continue;
+                            if (string.Equals(sp.name, name, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(sp.name, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                                sp.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                _iconCache[name] = sp;
+                                return sp;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
 
             return null;
         }
@@ -368,7 +472,7 @@ namespace Valhicle.Prefabs
             {
                 var b = behaviours[i];
                 if (b == null) continue;
-                if (b.gameObject == clone && (b is Piece || b is ZNetView || b is WearNTear || b is VehiclePiece || b is VehicleCore || b is VehicleLift || b is VehicleSeat || b is VehicleEngine || b is VehicleWheel || b is VehicleBearing || b is VehicleSuspension))
+                if (b.gameObject == clone && (b is Piece || b is ZNetView || b is WearNTear || b is VehiclePiece || b is VehicleCore || b is VehicleLift || b is VehicleSeat || b is VehicleEngine || b is VehicleWheel || b is VehicleBearing || b is VehicleRope))
                 {
                     continue;
                 }
@@ -416,7 +520,6 @@ namespace Valhicle.Prefabs
             piece.m_comfort = 0;
             if (_templatePiece != null)
             {
-                if (piece.m_icon == null) piece.m_icon = _templatePiece.m_icon;
                 if (_templatePiece.m_placeEffect != null) piece.m_placeEffect = _templatePiece.m_placeEffect;
             }
         }
@@ -437,7 +540,7 @@ namespace Valhicle.Prefabs
             wnt.m_materialType = WearNTear.MaterialType.Wood;
         }
 
-        private static void FinishPieceRoot(GameObject obj, bool groundOnly, string label, string desc, Piece.Requirement[] reqs, float health)
+        private static void FinishPieceRoot(GameObject obj, bool groundOnly, string label, string desc, Piece.Requirement[] reqs, float health, Sprite customIcon = null)
         {
             obj.transform.localScale = Vector3.one;
             VehicleUtil.SetLayerRecursive(obj, VehicleUtil.PieceLayer);
@@ -450,6 +553,17 @@ namespace Valhicle.Prefabs
             nview.m_persistent = true;
             nview.m_syncInitialScale = false;
             CleanTemplateZNetView(obj);
+
+            if (customIcon != null)
+            {
+                piece.m_icon = customIcon;
+            }
+            else if (piece.m_icon == null && _templatePiece != null)
+            {
+                piece.m_icon = _templatePiece.m_icon;
+            }
+
+            Plugin.Log.LogInfo($"[PrefabRegistry] Piece '{obj.name}' assigned icon '{(piece.m_icon != null ? piece.m_icon.name : "null")}'");
         }
 
         #region Prefab Creation
@@ -489,9 +603,10 @@ namespace Valhicle.Prefabs
             if (obj.GetComponent<VehiclePiece>() == null) obj.AddComponent<VehiclePiece>();
 
             VehicleUtil.AddSnapBox(obj.transform, 1.0f, 0.1f, 1.0f);
+            var liftIcon = FindIcon("piece_artisanstation", "artisanstation", "piece_workbench", "workbench", "piece_stonecutter");
             FinishPieceRoot(obj, groundOnly: true, "Vehicle Platform",
                 "A wooden floor you build on. Up/Down arrows raise and lower it. [E] freeze or drop physics.",
-                new[] { Req("Wood", 10), Req("SurtlingCore", 1) }, 400f);
+                new[] { Req("Wood", 10), Req("SurtlingCore", 1) }, 400f, liftIcon);
             var liftPiece = obj.GetComponent<Piece>();
             if (liftPiece != null)
             {
@@ -532,14 +647,14 @@ namespace Valhicle.Prefabs
             sync.m_syncBodyVelocity = true;
 
             obj.AddComponent<VehicleCore>();
-            obj.AddComponent<VehicleLift>();
             obj.AddComponent<VehiclePiece>();
 
             VehicleUtil.AddSnapBox(obj.transform, 1.0f, 0.1f, 1.0f);
 
+            var chassisIcon = FindIcon("Cart", "piece_cart", "cart", "piece_iron_floor", "wood_floor");
             FinishPieceRoot(obj, groundOnly: false, "Vehicle Chassis Platform",
                 "2m x 2m wooden chassis. Structural foundation of a motorized cart.",
-                new[] { Req("Wood", 4), Req("BronzeNails", 2) }, 350f);
+                new[] { Req("Wood", 4), Req("BronzeNails", 2) }, 350f, chassisIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
@@ -581,7 +696,21 @@ namespace Valhicle.Prefabs
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(-hub, 0f, 0f));
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(hub, 0f, 0f));
 
-            FinishPieceRoot(obj, false, label, $"Modular cart wheel. [E] toggle spin. Radius {radius:F2}m", reqs, 180f);
+            Sprite wheelIcon;
+            if (size == WheelSize.Small)
+            {
+                wheelIcon = FindIcon("ShieldWood", "shield_wood1", "shield_wood", "ShieldBronzeBuckler", "Cart");
+            }
+            else if (size == WheelSize.Medium)
+            {
+                wheelIcon = FindIcon("ShieldBanded", "shield_banded2", "shield_banded", "ShieldBronzeBuckler", "ShieldWood");
+            }
+            else
+            {
+                wheelIcon = FindIcon("piece_spinningwheel", "spinningwheel", "ShieldSilver", "ShieldBanded", "Cart");
+            }
+
+            FinishPieceRoot(obj, false, label, $"Modular cart wheel. [E] toggle spin. Radius {radius:F2}m", reqs, 180f, wheelIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
@@ -625,170 +754,6 @@ namespace Valhicle.Prefabs
             visual.transform.localScale = Vector3.one * s;
             // Pivot the mesh so the hub sits on the piece origin / snap point.
             visual.transform.localPosition = rot * Vector3.Scale(-b.center, visual.transform.localScale);
-        }
-
-        private static void OrientAndScaleSpring(GameObject visual, float desiredLength, float desiredDiameter)
-        {
-            var mf = visual.GetComponentInChildren<MeshFilter>(true);
-            if (mf == null || mf.sharedMesh == null)
-            {
-                visual.transform.localRotation = Quaternion.identity;
-                visual.transform.localScale = new Vector3(desiredDiameter, desiredLength * 0.5f, desiredDiameter);
-                visual.transform.localPosition = Vector3.zero;
-                return;
-            }
-
-            var b = mf.sharedMesh.bounds;
-            Vector3 size = b.size;
-
-            // Determine which axis corresponds to the helical coil axis.
-            int coilAxis = 1; // Default Y
-            float dX = Mathf.Abs(size.y - size.z);
-            float dY = Mathf.Abs(size.x - size.z);
-            float dZ = Mathf.Abs(size.x - size.y);
-
-            if (size.x > size.y * 1.15f && size.x > size.z * 1.15f) coilAxis = 0;
-            else if (size.y > size.x * 1.15f && size.y > size.z * 1.15f) coilAxis = 1;
-            else if (size.z > size.x * 1.15f && size.z > size.y * 1.15f) coilAxis = 2;
-            else if (size.x < size.y * 0.85f && size.x < size.z * 0.85f) coilAxis = 0;
-            else if (size.y < size.x * 0.85f && size.y < size.z * 0.85f) coilAxis = 1;
-            else if (size.z < size.x * 0.85f && size.z < size.y * 0.85f) coilAxis = 2;
-            else if (dX <= dY && dX <= dZ) coilAxis = 0;
-            else if (dZ <= dX && dZ <= dY) coilAxis = 2;
-            else coilAxis = 1;
-
-            Quaternion rot;
-            float meshLength;
-            float meshDiameter;
-
-            if (coilAxis == 0) // X -> Y
-            {
-                rot = Quaternion.Euler(0f, 0f, 90f);
-                meshLength = size.x;
-                meshDiameter = Mathf.Max(size.y, size.z);
-            }
-            else if (coilAxis == 2) // Z -> Y
-            {
-                rot = Quaternion.Euler(90f, 0f, 0f);
-                meshLength = size.z;
-                meshDiameter = Mathf.Max(size.x, size.y);
-            }
-            else // Y -> Y
-            {
-                rot = Quaternion.identity;
-                meshLength = size.y;
-                meshDiameter = Mathf.Max(size.x, size.z);
-            }
-
-            float lengthScale = desiredLength / Mathf.Max(0.01f, meshLength);
-            float diamScale = desiredDiameter / Mathf.Max(0.01f, meshDiameter);
-
-            Vector3 baseScale;
-            if (coilAxis == 0)
-                baseScale = new Vector3(lengthScale, diamScale, diamScale);
-            else if (coilAxis == 2)
-                baseScale = new Vector3(diamScale, diamScale, lengthScale);
-            else
-                baseScale = new Vector3(diamScale, lengthScale, diamScale);
-
-            visual.transform.localRotation = rot;
-            visual.transform.localScale = baseScale;
-            visual.transform.localPosition = rot * -Vector3.Scale(b.center, baseScale);
-        }
-
-        private static void CreateSuspensionPrefab(GameObject springSource, SuspensionType type, string name, string label, Piece.Requirement[] reqs)
-        {
-            var obj = CreateEmptyPieceObject(name, label,
-                $"Coiled metal suspension strut ({type}). Snaps between structures. [E] configure force, [Shift+E] mode.", reqs);
-
-            float height = type == SuspensionType.Standard ? 0.70f : 0.90f;
-            float span = height * 0.84f - 0.04f;
-            float springDiameter = type == SuspensionType.Standard ? 0.14f : 0.17f;
-
-            var col = obj.AddComponent<BoxCollider>();
-            col.size = new Vector3(0.24f, height, 0.24f);
-
-            // 1. Static base bracket
-            var botBracket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            botBracket.name = "BottomBracket";
-            botBracket.transform.SetParent(obj.transform, false);
-            botBracket.transform.localPosition = new Vector3(0f, -height * 0.42f, 0f);
-            botBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
-            var colBot = botBracket.GetComponent<Collider>();
-            if (colBot != null) UnityEngine.Object.DestroyImmediate(colBot);
-            Material metalMat = _ironMaterial ?? _woodMaterial;
-            if (metalMat != null) VehicleUtil.ApplySharedMaterial(botBracket, metalMat);
-
-            // 1b. Lower damper cylinder (guide tube)
-            var damperTube = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            damperTube.name = "BaseDamperTube";
-            damperTube.transform.SetParent(obj.transform, false);
-            damperTube.transform.localPosition = new Vector3(0f, -height * 0.15f, 0f);
-            damperTube.transform.localScale = new Vector3(0.06f, height * 0.25f, 0.06f);
-            var colDamper = damperTube.GetComponent<Collider>();
-            if (colDamper != null) UnityEngine.Object.DestroyImmediate(colDamper);
-            if (metalMat != null) VehicleUtil.ApplySharedMaterial(damperTube, metalMat);
-
-            // 2. Moving Head (holds top bracket, piston rod, and snapped child loads)
-            var movingHead = new GameObject("MovingHead");
-            movingHead.transform.SetParent(obj.transform, false);
-            movingHead.transform.localPosition = Vector3.zero;
-            movingHead.transform.localRotation = Quaternion.identity;
-            movingHead.transform.localScale = Vector3.one;
-
-            var topBracket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            topBracket.name = "TopBracket";
-            topBracket.transform.SetParent(movingHead.transform, false);
-            topBracket.transform.localPosition = new Vector3(0f, height * 0.42f, 0f);
-            topBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
-            var colTop = topBracket.GetComponent<Collider>();
-            if (colTop != null) UnityEngine.Object.DestroyImmediate(colTop);
-            if (metalMat != null) VehicleUtil.ApplySharedMaterial(topBracket, metalMat);
-
-            // 2b. Upper piston rod that slides into the lower damper tube
-            var pistonRod = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            pistonRod.name = "PistonRod";
-            pistonRod.transform.SetParent(movingHead.transform, false);
-            pistonRod.transform.localPosition = new Vector3(0f, height * 0.15f, 0f);
-            pistonRod.transform.localScale = new Vector3(0.038f, height * 0.25f, 0.038f);
-            var colPiston = pistonRod.GetComponent<Collider>();
-            if (colPiston != null) UnityEngine.Object.DestroyImmediate(colPiston);
-            if (metalMat != null) VehicleUtil.ApplySharedMaterial(pistonRod, metalMat);
-
-            // 3. Spring Container & Mesh
-            var springContainer = new GameObject("SpringContainer");
-            springContainer.transform.SetParent(obj.transform, false);
-            springContainer.transform.localPosition = Vector3.zero;
-            springContainer.transform.localRotation = Quaternion.identity;
-            springContainer.transform.localScale = Vector3.one;
-
-            var springVisual = CreateVisualMeshChild(springSource, springContainer.transform, Vector3.zero, Quaternion.identity, Vector3.one);
-            springVisual.name = "SpringMeshVisual";
-            OrientAndScaleSpring(springVisual, span, springDiameter);
-
-            // 4. VehicleSuspension Component setup
-            var susp = obj.AddComponent<VehicleSuspension>();
-            susp.Type = type;
-            susp.MovingHead = movingHead.transform;
-            susp.SpringContainer = springContainer.transform;
-            susp.SpringMeshTransform = springVisual.transform;
-            susp.PistonRod = pistonRod.transform;
-            susp.BaseDamperTube = damperTube.transform;
-            susp.TopBracket = topBracket.transform;
-            susp.BottomBracket = botBracket.transform;
-            susp.OriginalSpringScale = springVisual.transform.localScale;
-            susp.RestLength = height * 0.84f;
-            susp.SpringForce = type == SuspensionType.Standard ? 2500f : 5000f;
-            susp.ApplySuspensionSettings();
-
-            // 5. VehiclePiece & Snap Points
-            obj.AddComponent<VehiclePiece>();
-            VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, -height * 0.5f, 0f));
-            VehicleUtil.AddSnapPoint(movingHead.transform, new Vector3(0f, height * 0.5f, 0f));
-            VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, height * 0.5f, 0f));
-
-            FinishPieceRoot(obj, false, label, $"Coiled metal suspension strut ({type}). [E] set force, [Shift+E] mode.", reqs, 160f);
-            RegisterPrefab(obj, isPiece: true);
         }
 
         private static void CreateButtonBearingPrefab(string name, string label, Piece.Requirement[] reqs)
@@ -917,8 +882,52 @@ namespace Valhicle.Prefabs
             bearing.RotatingHead = head.transform;
             obj.AddComponent<VehiclePiece>();
 
+            var bearingIcon = FindIcon("CharredCogwheel", "Bronze", "BronzeNails", "ShieldBronzeBuckler", "IronNails", "Coins");
             FinishPieceRoot(obj, false, label,
-                "Rotatable button swivel. [E] cycles Steering / FreeSpin / Motorized. Arrow keys or [Hold E] sets speed.", reqs, 140f);
+                "Rotatable button swivel. [E] cycles Steering / FreeSpin / Motorized. Arrow keys or [Hold E] sets speed.", reqs, 140f, bearingIcon);
+            RegisterPrefab(obj, isPiece: true);
+        }
+
+        private static void CreateRopePrefab(string name, string label, Piece.Requirement[] reqs)
+        {
+            var obj = CreateEmptyPieceObject(name, label,
+                "Dynamic physics cable & spring. Click 2 points to connect. [E] Toggle Stiff/Elastic, [L] exact length, [Arrows] nudge.", reqs);
+
+            var col = obj.AddComponent<BoxCollider>();
+            col.size = new Vector3(0.25f, 0.15f, 0.25f);
+            col.isTrigger = true;
+
+            Material metalMat = _ironMaterial ?? _woodMaterial;
+            VehicleRope.CleatMaterial = metalMat;
+
+            // Anchor A Cleat Visual (plate + ring) - single point at crosshairs
+            VehicleRope.CreateCleatVisual(obj.transform, metalMat);
+
+            // LineRenderer setup (view alignment for 360 cylindrical view, rope texture tiling, 3.5cm rope width)
+            var lr = obj.AddComponent<LineRenderer>();
+            lr.useWorldSpace = true;
+            lr.alignment = LineAlignment.View;
+            lr.textureMode = LineTextureMode.Tile;
+            lr.startWidth = 0.035f;
+            lr.endWidth = 0.035f;
+            lr.positionCount = 0;
+            lr.numCapVertices = 4;
+            lr.numCornerVertices = 4;
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            lr.receiveShadows = true;
+            lr.enabled = false;
+
+            Material ropeMat = VehicleRope.GetHarpoonMaterial();
+            if (ropeMat != null) lr.sharedMaterial = ropeMat;
+
+            // VehicleRope component (separate world entity, NOT a VehiclePiece)
+            var rope = obj.AddComponent<VehicleRope>();
+            rope.RopeLine = lr;
+            rope.RestLength = 2.0f;
+
+            var ropeIcon = FindIcon("LinenThread", "linenthread", "LeatherScraps", "leatherscraps", "Chain", "chain", "DeerHide");
+            FinishPieceRoot(obj, false, label,
+                "Dynamic physics cable & spring. Click 2 points to connect. [E] Toggle Stiff/Elastic, [L] exact length, [Arrows] nudge.", reqs, 80f, ropeIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
@@ -979,7 +988,9 @@ namespace Valhicle.Prefabs
 
             obj.AddComponent<VehiclePiece>();
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, 0f, 0f));
-            FinishPieceRoot(obj, false, label, "Driver station. [E] Mount and drive with W/A/S/D.", reqs, 200f);
+            var seatIcon = (chairPrefab != null ? chairPrefab.GetComponent<Piece>()?.m_icon : null)
+                        ?? FindIcon("piece_chair", "chair", "piece_chair02", "piece_chair01");
+            FinishPieceRoot(obj, false, label, "Driver station. [E] Mount and drive with W/A/S/D.", reqs, 200f, seatIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
@@ -1063,7 +1074,10 @@ namespace Valhicle.Prefabs
 
             obj.AddComponent<VehiclePiece>();
             VehicleUtil.AddSnapPoint(obj.transform, new Vector3(0f, -size * 0.45f, 0f));
-            FinishPieceRoot(obj, false, label, $"Coal-burning steam engine ({tier}). [E] Add Coal.", reqs, 280f);
+            Sprite engineIcon = tier == EngineTier.Heavy
+                ? FindIcon("blastfurnace", "piece_blastfurnace", "smelter", "piece_smelter")
+                : FindIcon("smelter", "piece_smelter");
+            FinishPieceRoot(obj, false, label, $"Coal-burning steam engine ({tier}). [E] Add Coal.", reqs, 280f, engineIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
