@@ -17,6 +17,9 @@ namespace Valhicle.Prefabs
         private static PieceTable _vehiclePieceTable;
         private static Piece _templatePiece;
         private static Material _woodMaterial;
+        private static Material _ironMaterial;
+        private static Material _bronzeMaterial;
+        private static Material _darkWoodMaterial;
 
         public static void Reset()
         {
@@ -61,6 +64,24 @@ namespace Valhicle.Prefabs
                     _templatePiece = woodFloorPrefab.GetComponent<Piece>();
                     _woodMaterial = VehicleUtil.GetSharedMaterial(woodFloorPrefab);
                 }
+
+                var ironItem = ObjectDB.instance.GetItemPrefab("Iron")
+                            ?? ObjectDB.instance.GetItemPrefab("IronNails")
+                            ?? FindPrefab("Iron", "IronNails", "iron_nails", "piece_iron_beam", "iron_grate");
+                if (ironItem != null) _ironMaterial = VehicleUtil.GetSharedMaterial(ironItem);
+                if (_ironMaterial == null && springItem != null) _ironMaterial = VehicleUtil.GetSharedMaterial(springItem);
+                if (_ironMaterial == null && smelterPrefab != null) _ironMaterial = VehicleUtil.GetSharedMaterial(smelterPrefab);
+
+                var bronzeItem = ObjectDB.instance.GetItemPrefab("Bronze")
+                              ?? ObjectDB.instance.GetItemPrefab("BronzeNails")
+                              ?? FindPrefab("Bronze", "BronzeNails", "bronze_nails");
+                if (bronzeItem != null) _bronzeMaterial = VehicleUtil.GetSharedMaterial(bronzeItem);
+                if (_bronzeMaterial == null) _bronzeMaterial = _ironMaterial;
+
+                var darkWoodPiece = FindPrefab("piece_darkwood_pole", "piece_darkwood_beam", "darkwood_pole", "darkwood_beam");
+                if (darkWoodPiece != null) _darkWoodMaterial = VehicleUtil.GetSharedMaterial(darkWoodPiece);
+                if (_darkWoodMaterial == null && cartPrefab != null) _darkWoodMaterial = VehicleUtil.GetSharedMaterial(cartPrefab);
+                if (_darkWoodMaterial == null) _darkWoodMaterial = _woodMaterial;
 
                 Plugin.Log.LogInfo($"Found base prefabs: Cart={cartPrefab?.name}, WheelSource={wheelSource?.name}, Spring={springItem?.name}, Chair={chairPrefab?.name}, Smelter={smelterPrefab?.name}");
 
@@ -684,7 +705,8 @@ namespace Valhicle.Prefabs
             botBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
             var colBot = botBracket.GetComponent<Collider>();
             if (colBot != null) UnityEngine.Object.DestroyImmediate(colBot);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(botBracket, _woodMaterial);
+            Material metalMat = _ironMaterial ?? _woodMaterial;
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(botBracket, metalMat);
 
             // 1b. Lower damper cylinder (guide tube)
             var damperTube = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -694,7 +716,7 @@ namespace Valhicle.Prefabs
             damperTube.transform.localScale = new Vector3(0.06f, height * 0.25f, 0.06f);
             var colDamper = damperTube.GetComponent<Collider>();
             if (colDamper != null) UnityEngine.Object.DestroyImmediate(colDamper);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(damperTube, _woodMaterial);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(damperTube, metalMat);
 
             // 2. Moving Head (holds top bracket, piston rod, and snapped child loads)
             var movingHead = new GameObject("MovingHead");
@@ -710,7 +732,7 @@ namespace Valhicle.Prefabs
             topBracket.transform.localScale = new Vector3(0.20f, 0.04f, 0.20f);
             var colTop = topBracket.GetComponent<Collider>();
             if (colTop != null) UnityEngine.Object.DestroyImmediate(colTop);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(topBracket, _woodMaterial);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(topBracket, metalMat);
 
             // 2b. Upper piston rod that slides into the lower damper tube
             var pistonRod = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -720,7 +742,7 @@ namespace Valhicle.Prefabs
             pistonRod.transform.localScale = new Vector3(0.038f, height * 0.25f, 0.038f);
             var colPiston = pistonRod.GetComponent<Collider>();
             if (colPiston != null) UnityEngine.Object.DestroyImmediate(colPiston);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(pistonRod, _woodMaterial);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(pistonRod, metalMat);
 
             // 3. Spring Container & Mesh
             var springContainer = new GameObject("SpringContainer");
@@ -733,7 +755,7 @@ namespace Valhicle.Prefabs
             springVisual.name = "SpringMeshVisual";
             OrientAndScaleSpring(springVisual, span, springDiameter);
 
-            // 4. VehicleSuspension Component
+            // 4. VehicleSuspension Component setup
             var susp = obj.AddComponent<VehicleSuspension>();
             susp.Type = type;
             susp.MovingHead = movingHead.transform;
@@ -761,51 +783,114 @@ namespace Valhicle.Prefabs
         private static void CreateButtonBearingPrefab(string name, string label, Piece.Requirement[] reqs)
         {
             var obj = CreateEmptyPieceObject(name, label,
-                "Rotatable button swivel. Sits flush on top, bottom, or the side of a chassis. Snap wheels onto the button. [E] cycles Steering / FreeSpin / Motorized.", reqs);
+                "Rotatable button swivel. Sits flush on top, bottom, or the side of a chassis. Snap wheels onto the button. [E] cycles Steering / FreeSpin / Motorized. Arrow keys or [Hold E] sets speed.", reqs);
 
             var col = obj.AddComponent<BoxCollider>();
             col.size = new Vector3(0.44f, 0.12f, 0.44f);
 
-            // Static mount plate (does not spin). Everything else lives on RotatingHead.
+            // High-detail Viking mechanical materials:
+            Material metalMat = _ironMaterial ?? _woodMaterial;
+            Material bronzeMat = _bronzeMaterial ?? metalMat;
+            Material hubMat = _darkWoodMaterial ?? _woodMaterial;
+
+            // 1. Static base mount plate (does not spin with the hub)
+            // Sits flush against the mounting surface: dark iron circular bracket
             var mount = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             mount.name = "MountPlate";
             mount.transform.SetParent(obj.transform, false);
             mount.transform.localPosition = new Vector3(0f, -0.04f, 0f);
-            mount.transform.localScale = new Vector3(0.48f, 0.02f, 0.48f);
+            mount.transform.localScale = new Vector3(0.46f, 0.018f, 0.46f);
             var colMount = mount.GetComponent<Collider>();
             if (colMount != null) UnityEngine.Object.DestroyImmediate(colMount);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(mount, _woodMaterial);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(mount, metalMat);
 
+            // 4 corner mounting bolt lugs on the static plate for a rugged bolted look
+            float boltDist = 0.17f;
+            Vector3[] boltOffsets = new[]
+            {
+                new Vector3(boltDist, -0.035f, boltDist),
+                new Vector3(-boltDist, -0.035f, boltDist),
+                new Vector3(boltDist, -0.035f, -boltDist),
+                new Vector3(-boltDist, -0.035f, -boltDist)
+            };
+            for (int i = 0; i < boltOffsets.Length; i++)
+            {
+                var bolt = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                bolt.name = $"MountBolt_{i}";
+                bolt.transform.SetParent(obj.transform, false);
+                bolt.transform.localPosition = boltOffsets[i];
+                bolt.transform.localScale = new Vector3(0.045f, 0.015f, 0.045f);
+                var cBolt = bolt.GetComponent<Collider>();
+                if (cBolt != null) UnityEngine.Object.DestroyImmediate(cBolt);
+                if (metalMat != null) VehicleUtil.ApplySharedMaterial(bolt, metalMat);
+            }
+
+            // 2. Rotating Head (holds the outer race, bronze collar, turntable, center cap, and direction indicator)
             var head = new GameObject("RotatingHead");
             head.transform.SetParent(obj.transform, false);
             head.transform.localPosition = Vector3.zero;
             head.transform.localScale = Vector3.one;
 
+            // Outer Bearing Housing Race Rim (dark iron ring)
             var baseRim = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             baseRim.name = "BearingHousing";
             baseRim.transform.SetParent(head.transform, false);
-            baseRim.transform.localPosition = Vector3.zero;
-            baseRim.transform.localScale = new Vector3(0.44f, 0.05f, 0.44f);
+            baseRim.transform.localPosition = new Vector3(0f, 0f, 0f);
+            baseRim.transform.localScale = new Vector3(0.42f, 0.04f, 0.42f);
             var colRim = baseRim.GetComponent<Collider>();
             if (colRim != null) UnityEngine.Object.DestroyImmediate(colRim);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(baseRim, _woodMaterial);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(baseRim, metalMat);
 
+            // Bronze collar / bearing ring between outer housing and inner core
+            var bronzeRing = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            bronzeRing.name = "BronzeCollar";
+            bronzeRing.transform.SetParent(head.transform, false);
+            bronzeRing.transform.localPosition = new Vector3(0f, 0.02f, 0f);
+            bronzeRing.transform.localScale = new Vector3(0.36f, 0.045f, 0.36f);
+            var colCollar = bronzeRing.GetComponent<Collider>();
+            if (colCollar != null) UnityEngine.Object.DestroyImmediate(colCollar);
+            if (bronzeMat != null) VehicleUtil.ApplySharedMaterial(bronzeRing, bronzeMat);
+
+            // Center Turntable Core (dark wood or fine bronze)
             var centerButton = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             centerButton.name = "CenterButton";
             centerButton.transform.SetParent(head.transform, false);
-            centerButton.transform.localPosition = new Vector3(0f, 0.04f, 0f);
-            centerButton.transform.localScale = new Vector3(0.36f, 0.06f, 0.36f);
+            centerButton.transform.localPosition = new Vector3(0f, 0.045f, 0f);
+            centerButton.transform.localScale = new Vector3(0.30f, 0.05f, 0.30f);
             var colBtn = centerButton.GetComponent<Collider>();
             if (colBtn != null) UnityEngine.Object.DestroyImmediate(colBtn);
-            if (_woodMaterial != null) VehicleUtil.ApplySharedMaterial(centerButton, _woodMaterial);
+            if (hubMat != null) VehicleUtil.ApplySharedMaterial(centerButton, hubMat);
 
+            // Central iron spindle cap / axle bolt
+            var centerCap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            centerCap.name = "SpindleCap";
+            centerCap.transform.SetParent(head.transform, false);
+            centerCap.transform.localPosition = new Vector3(0f, 0.075f, 0f);
+            centerCap.transform.localScale = new Vector3(0.11f, 0.025f, 0.11f);
+            var colCap = centerCap.GetComponent<Collider>();
+            if (colCap != null) UnityEngine.Object.DestroyImmediate(colCap);
+            if (metalMat != null) VehicleUtil.ApplySharedMaterial(centerCap, metalMat);
+
+            // Direction indicator notch (arrow along +Z forward) with authentic metallic bronze material
             var arm = GameObject.CreatePrimitive(PrimitiveType.Cube);
             arm.name = "SpinArm";
             arm.transform.SetParent(head.transform, false);
-            arm.transform.localPosition = new Vector3(0f, 0.08f, 0.14f);
-            arm.transform.localScale = new Vector3(0.06f, 0.04f, 0.28f);
+            arm.transform.localPosition = new Vector3(0f, 0.072f, 0.105f);
+            arm.transform.localScale = new Vector3(0.042f, 0.028f, 0.13f);
             var colArm = arm.GetComponent<Collider>();
             if (colArm != null) UnityEngine.Object.DestroyImmediate(colArm);
+            if (bronzeMat != null) VehicleUtil.ApplySharedMaterial(arm, bronzeMat);
+
+            // Arrow tip notch pointing towards +Z
+            var arrowTip = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            arrowTip.name = "SpinArmTip";
+            arrowTip.transform.SetParent(head.transform, false);
+            arrowTip.transform.localPosition = new Vector3(0f, 0.072f, 0.18f);
+            arrowTip.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+            arrowTip.transform.localScale = new Vector3(0.045f, 0.026f, 0.045f);
+            var colTip = arrowTip.GetComponent<Collider>();
+            if (colTip != null) UnityEngine.Object.DestroyImmediate(colTip);
+            if (bronzeMat != null) VehicleUtil.ApplySharedMaterial(arrowTip, bronzeMat);
 
             // Snap points must be DIRECT children of the piece root (Piece.GetSnapPoints).
             // +Y is the button face (wheels snap here); -Y is the mount face.
@@ -822,7 +907,7 @@ namespace Valhicle.Prefabs
             obj.AddComponent<VehiclePiece>();
 
             FinishPieceRoot(obj, false, label,
-                "Rotatable button swivel. [E] cycles Steering / FreeSpin / Motorized.", reqs, 140f);
+                "Rotatable button swivel. [E] cycles Steering / FreeSpin / Motorized. Arrow keys or [Hold E] sets speed.", reqs, 140f);
             RegisterPrefab(obj, isPiece: true);
         }
 

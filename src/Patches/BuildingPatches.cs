@@ -149,6 +149,7 @@ namespace Valhicle.Patches
         [HarmonyPostfix]
         public static void PieceRayTestPostfix(
             Player __instance,
+            GameObject ___m_placementGhost,
             ref bool __result,
             ref Vector3 point,
             ref Vector3 normal,
@@ -157,7 +158,7 @@ namespace Valhicle.Patches
             ref Collider waterSurface)
         {
             if (GameCamera.instance == null) return;
-            if (!VehiclePlacement.TryRaycast(__instance, null, out RaycastHit hit)) return;
+            if (!VehiclePlacement.TryRaycast(__instance, ___m_placementGhost, out RaycastHit hit)) return;
             if (hit.collider == null) return;
             if (!IsBuildableVehicleSurface(hit.collider)) return;
 

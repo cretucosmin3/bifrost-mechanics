@@ -68,6 +68,7 @@ namespace Valhicle.Core
             }
 
             ghost.SetActive(true);
+            ghost.transform.localScale = Vector3.one;
             Traverse.Create(player).Field("m_placementStatus").SetValue(0);
             var setValid = AccessTools.Method(typeof(Player), "SetPlacementGhostValid");
             setValid?.Invoke(player, new object[] { true });
@@ -105,9 +106,8 @@ namespace Valhicle.Core
         private static void ApplyBearingOnSurface(Transform t, Vector3 point, Vector3 normal, float twist)
         {
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
-            // Twist around the surface normal so wall mounts stay a round puck, not a sheared oval.
-            t.rotation = Quaternion.AngleAxis(twist, n) * RotationWithUp(n, 0f);
-            t.position = point + n * 0.06f;
+            t.rotation = RotationWithUp(n, twist);
+            t.position = point + n * 0.04f;
             t.localScale = Vector3.one;
         }
 
@@ -116,7 +116,7 @@ namespace Valhicle.Core
             Vector3 n = normal.sqrMagnitude > 0.001f ? normal.normalized : Vector3.up;
             var susp = t.GetComponent<VehicleSuspension>();
             float halfHeight = (susp != null ? susp.RestLength : 0.70f) * 0.42f + 0.02f;
-            t.rotation = Quaternion.AngleAxis(twist, n) * RotationWithUp(n, 0f);
+            t.rotation = RotationWithUp(n, twist);
             t.position = point + n * halfHeight;
             t.localScale = Vector3.one;
         }
@@ -161,12 +161,27 @@ namespace Valhicle.Core
         public static Quaternion RotationWithUp(Vector3 up, float twistDegrees)
         {
             up = up.normalized;
-            Vector3 forward = Vector3.ProjectOnPlane(Vector3.forward, up);
-            if (forward.sqrMagnitude < 0.001f)
+            Vector3 forward;
+            if (Mathf.Abs(up.y) > 0.85f)
             {
-                forward = Vector3.ProjectOnPlane(Vector3.right, up);
+                // Horizontal surface (floor / ceiling): reference tangent is forward (North)
+                forward = Vector3.ProjectOnPlane(Vector3.forward, up);
+                if (forward.sqrMagnitude < 0.001f)
+                {
+                    forward = Vector3.ProjectOnPlane(Vector3.right, up);
+                }
             }
-            return Quaternion.LookRotation(forward.normalized, up) * Quaternion.Euler(0f, twistDegrees, 0f);
+            else
+            {
+                // Vertical or sloped face (walls / sides): reference tangent along the wall is world up (+Y)
+                forward = Vector3.ProjectOnPlane(Vector3.up, up);
+                if (forward.sqrMagnitude < 0.001f)
+                {
+                    forward = Vector3.ProjectOnPlane(Vector3.forward, up);
+                }
+            }
+            forward.Normalize();
+            return Quaternion.LookRotation(forward, up) * Quaternion.Euler(0f, twistDegrees, 0f);
         }
 
         /// <summary>transform.right = right (wheel axle), twist around that axis.</summary>
