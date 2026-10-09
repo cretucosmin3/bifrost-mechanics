@@ -21,7 +21,7 @@ namespace Valhicle.Components
         public BearingMode Mode = BearingMode.FreeSpinning;
         public float MaxSteerAngle = 35f;
         public float SteerSpeed = 160f;
-        public float MotorSpeed = 180f;
+        public float MotorSpeed = 30f;
         public bool Reverse;
         public Transform RotatingHead;
         public float CurrentAngle { get; private set; }
@@ -331,7 +331,7 @@ namespace Valhicle.Components
                 _lastVehicleVel = v;
             }
 
-            float totalTorque = Mathf.Clamp(_externalTorque, -4000f, 4000f);
+            float totalTorque = Mathf.Clamp(_externalTorque, -25000f, 25000f);
             _externalTorque = 0f;
             float totalInertia = 4.0f;
 
@@ -505,11 +505,11 @@ namespace Valhicle.Components
                 if (_arrowHoldTimer > 0.35f)
                 {
                     _arrowRepeatTimer += Time.deltaTime;
-                    float repeatRate = _arrowHoldTimer > 1.5f ? 0.04f : 0.08f;
+                    float repeatRate = _arrowHoldTimer > 1.5f ? 0.05f : 0.10f;
                     if (_arrowRepeatTimer >= repeatRate)
                     {
                         _arrowRepeatTimer = 0f;
-                        float step = _arrowHoldTimer > 2.5f ? 4f : 1f;
+                        float step = 1f;
                         if (isShift) coarseDelta += step;
                         else delta += step;
                     }
@@ -531,12 +531,13 @@ namespace Valhicle.Components
             {
                 if (Mathf.Abs(delta) > 0.001f)
                 {
-                    MotorSpeed = Mathf.Clamp(MotorSpeed + delta * 15f, 5f, 3600f);
+                    MotorSpeed = Mathf.Clamp(MotorSpeed + delta * 5f, 5f, 720f);
                 }
                 if (Mathf.Abs(coarseDelta) > 0.001f)
                 {
-                    MotorSpeed = Mathf.Clamp(MotorSpeed + coarseDelta * 60f, 5f, 3600f);
+                    MotorSpeed = Mathf.Clamp(MotorSpeed + coarseDelta * 25f, 5f, 720f);
                 }
+                MotorSpeed = Mathf.Round(MotorSpeed / 5f) * 5f;
                 SaveZdo();
                 player.Message(MessageHud.MessageType.Center, $"Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)");
             }
@@ -573,7 +574,7 @@ namespace Valhicle.Components
         {
             if (TextInput.instance == null) return;
             string prompt = Mode == BearingMode.Motorized
-                ? "Motor Speed (5 - 3600 °/s or e.g. '30 rpm')"
+                ? "Motor Speed in °/s (5 - 720, e.g. '30' or '5 rpm')"
                 : (Mode == BearingMode.Steering ? "Steer Angle Limit (10 - 85°)" : "FreeSpin Travel Range (0 = 360°, 10-180°)");
             TextInput.instance.RequestText(this, prompt, 12);
         }
@@ -649,7 +650,7 @@ namespace Valhicle.Components
                         Reverse = true;
                         val = Mathf.Abs(val);
                     }
-                    MotorSpeed = Mathf.Clamp(val, 5f, 3600f);
+                    MotorSpeed = Mathf.Clamp(Mathf.Round(val / 5f) * 5f, 5f, 720f);
                     SaveZdo();
                     Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Bearing Motor Speed: {MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)");
                 }
@@ -699,7 +700,7 @@ namespace Valhicle.Components
                 return Localization.instance.Localize(
                     "<b>Mechanical Bearing (Motorized)</b>\n" +
                     $"Speed: <color=yellow>{MotorSpeed:0}°/s ({MotorSpeed / 6f:0.0} RPM)</color>   Dir: {dirStr}\n" +
-                    "[<color=yellow><b>Left / Right arrows</b></color>] Speed (±15°/s)   [<color=yellow><b>Shift + Arrows / [ ]</b></color>] ±60°/s\n" +
+                    "[<color=yellow><b>Left / Right arrows</b></color>] Speed (±5°/s)   [<color=yellow><b>Shift + Arrows / [ ]</b></color>] ±25°/s\n" +
                     "[<color=yellow><b>$KEY_Use</b></color>] Mode   [<color=yellow><b>Hold $KEY_Use</b></color>] Set Speed   [<color=yellow><b>Shift + $KEY_Use</b></color>] Reverse"
                 );
             }

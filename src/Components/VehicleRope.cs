@@ -14,6 +14,14 @@ namespace Valhicle.Components
         Elastic = 1   // Springy Bungee: Dynamic vehicle suspension & shock absorption
     }
 
+    public enum RopeStrength
+    {
+        Light = 0,    // 500 kg (~6.5 kN) - Suspension & tie-downs
+        Medium = 1,   // 1,500 kg (~18 kN) - Standard vehicles, towing, cargo
+        Heavy = 2,    // 3,500 kg (~35 kN) - Heavy vehicles, cranes, booms
+        Titan = 3     // 7,000 kg (~70 kN) - Extreme industrial & bridge lifts
+    }
+
     /// <summary>
     /// Interactive 2-point rope that can tie down cargo, tether carts to hitching posts, tow trailers,
     /// or mechanically steer/rotate bearings.
@@ -27,6 +35,7 @@ namespace Valhicle.Components
         public static Material CleatMaterial;
 
         public RopeMode Mode = RopeMode.Stiff;
+        public RopeStrength Strength = RopeStrength.Medium;
         public float RestLength = 2.0f;
         public float CurrentTension { get; private set; }
         public float CurrentDistance { get; private set; }
@@ -237,6 +246,7 @@ namespace Valhicle.Components
                     Mode = (oldElast == 2) ? RopeMode.Elastic : RopeMode.Stiff;
                 }
                 RestLength = zdo.GetFloat(GetZdoKey("RestLength"), RestLength);
+                Strength = (RopeStrength)zdo.GetInt(GetZdoKey("Strength"), (int)Strength);
                 IsConfigured = zdo.GetBool(GetZdoKey("Configured"), false);
 
                 if (IsConfigured && !_restoreDone)
@@ -608,18 +618,31 @@ namespace Valhicle.Components
 
         public void GetPhysicalProperties(out float stiffness, out float damping, out float maxTension)
         {
-            switch (Mode)
+            switch (Strength)
             {
-                case RopeMode.Elastic:
-                    stiffness = 1800f;
-                    damping = 120f;
-                    maxTension = 3500f;
-                    break;
-                case RopeMode.Stiff:
-                default:
-                    stiffness = 6000f;
-                    damping = 220f;
+                case RopeStrength.Light:
                     maxTension = 6500f;
+                    stiffness = Mode == RopeMode.Elastic ? 2000f : 8000f;
+                    damping = Mode == RopeMode.Elastic ? 120f : 250f;
+                    break;
+
+                case RopeStrength.Heavy:
+                    maxTension = 35000f;
+                    stiffness = Mode == RopeMode.Elastic ? 10000f : 45000f;
+                    damping = Mode == RopeMode.Elastic ? 380f : 750f;
+                    break;
+
+                case RopeStrength.Titan:
+                    maxTension = 70000f;
+                    stiffness = Mode == RopeMode.Elastic ? 20000f : 85000f;
+                    damping = Mode == RopeMode.Elastic ? 650f : 1200f;
+                    break;
+
+                case RopeStrength.Medium:
+                default:
+                    maxTension = 18000f;
+                    stiffness = Mode == RopeMode.Elastic ? 5000f : 22000f;
+                    damping = Mode == RopeMode.Elastic ? 220f : 450f;
                     break;
             }
         }
@@ -691,15 +714,15 @@ namespace Valhicle.Components
             {
                 if (RbA != null && !RbA.isKinematic)
                 {
-                    // Clamp max linear force so vehicle/platform is never accelerated beyond 25 m/s² (2.5g)
-                    float maxBodyForceA = Mathf.Min(maxTension, RbA.mass * 25f);
+                    // Allow up to 3.5g of vertical lifting acceleration (35 m/s²)
+                    float maxBodyForceA = Mathf.Min(maxTension, RbA.mass * 35f);
                     Vector3 clampedForceA = Vector3.ClampMagnitude(forceOnA, maxBodyForceA);
                     RbA.AddForceAtPosition(clampedForceA, posA, ForceMode.Force);
                 }
 
                 if (RbB != null && !RbB.isKinematic)
                 {
-                    float maxBodyForceB = Mathf.Min(maxTension, RbB.mass * 25f);
+                    float maxBodyForceB = Mathf.Min(maxTension, RbB.mass * 35f);
                     Vector3 clampedForceB = Vector3.ClampMagnitude(forceOnB, maxBodyForceB);
                     RbB.AddForceAtPosition(clampedForceB, posB, ForceMode.Force);
                 }
@@ -909,6 +932,15 @@ namespace Valhicle.Components
                 return false;
             }
 
+            if (alt)
+            {
+                // [Shift + E] cycles strength capacity: Light -> Medium -> Heavy -> Titan -> Light
+                Strength = (RopeStrength)(((int)Strength + 1) % 4);
+                SaveZdo();
+                player.Message(MessageHud.MessageType.Center, $"Rope Strength: {GetStrengthName()}");
+                return true;
+            }
+
             // [E] toggles between Stiff (Rigid Cable) and Elastic (Spring Suspension)
             Mode = (Mode == RopeMode.Stiff) ? RopeMode.Elastic : RopeMode.Stiff;
             SaveZdo();
@@ -925,9 +957,10 @@ namespace Valhicle.Components
             return Localization.instance.Localize(
                 $"<b>Rope Tie-Down</b>\n" +
                 $"Span: <color=yellow>{CurrentDistance:0.00}m / {EffectiveRestLength:0.00}m</color>   Mode: <color=yellow>{GetModeName()}</color>\n" +
-                $"Tension: {tensionStr}\n" +
+                $"Strength: <color=yellow>{GetStrengthName()}</color>   Tension: {tensionStr}\n" +
                 "[<color=yellow><b>$KEY_Use</b></color>] Toggle Stiff / Elastic   " +
-                "[<color=yellow><b>L</b></color>] Set Exact Length\n" +
+                "[<color=yellow><b>Shift + $KEY_Use</b></color>] Cycle Strength\n" +
+                "[<color=yellow><b>L</b></color>] Set Exact Length   " +
                 "[<color=yellow><b>Left / Right arrows</b></color>] Nudge (±0.05m, Shift ±0.50m)"
             );
         }
@@ -959,12 +992,25 @@ namespace Valhicle.Components
             }
         }
 
+        public string GetStrengthName()
+        {
+            switch (Strength)
+            {
+                case RopeStrength.Light: return "Light (500 kg / 6.5 kN)";
+                case RopeStrength.Heavy: return "Heavy (3,500 kg / 35 kN)";
+                case RopeStrength.Titan: return "Titan (7,000 kg / 70 kN)";
+                case RopeStrength.Medium:
+                default: return "Medium (1,500 kg / 18 kN)";
+            }
+        }
+
         private void SaveZdo()
         {
             if (_nview == null || !_nview.IsValid()) return;
             var zdo = _nview.GetZDO();
             zdo.Set(GetZdoKey("Configured"), IsConfigured);
             zdo.Set(GetZdoKey("Mode"), (int)Mode);
+            zdo.Set(GetZdoKey("Strength"), (int)Strength);
             zdo.Set(GetZdoKey("RestLength"), RestLength);
 
             zdo.Set(GetZdoKey("TargetA"), _targetZdoA);

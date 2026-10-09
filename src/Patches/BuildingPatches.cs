@@ -46,7 +46,7 @@ namespace Valhicle.Patches
                     var active = VehicleRope.ActivePendingRope;
                     active.InitAnchorB(pos, LastHitCollider, LastHitPoint);
                     VehicleRope.ActivePendingRope = null;
-                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Rope secured! Span: {active.RestLength:0.00}m ([E] Stiff/Elastic, [L] Length)");
+                    Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Rope secured! Span: {active.RestLength:0.00}m ([E] Stiff/Elastic, [Shift+E] Strength, [L] Length)");
 
                     // Refund materials consumed for piece B so a rope costs 1 placement
                     var pieceComp = placed.GetComponent<Piece>();

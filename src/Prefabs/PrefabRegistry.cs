@@ -891,7 +891,7 @@ namespace Valhicle.Prefabs
         private static void CreateRopePrefab(string name, string label, Piece.Requirement[] reqs)
         {
             var obj = CreateEmptyPieceObject(name, label,
-                "Dynamic physics cable & spring. Click 2 points to connect. [E] Toggle Stiff/Elastic, [L] exact length, [Arrows] nudge.", reqs);
+                "Dynamic physics cable & spring. Click 2 points to connect. [E] Stiff/Elastic, [Shift+E] Strength, [L] length.", reqs);
 
             var col = obj.AddComponent<BoxCollider>();
             col.size = new Vector3(0.25f, 0.15f, 0.25f);
@@ -927,7 +927,7 @@ namespace Valhicle.Prefabs
 
             var ropeIcon = FindIcon("LinenThread", "linenthread", "LeatherScraps", "leatherscraps", "Chain", "chain", "DeerHide");
             FinishPieceRoot(obj, false, label,
-                "Dynamic physics cable & spring. Click 2 points to connect. [E] Toggle Stiff/Elastic, [L] exact length, [Arrows] nudge.", reqs, 80f, ropeIcon);
+                "Dynamic physics cable & spring. Click 2 points to connect. [E] Stiff/Elastic, [Shift+E] Strength, [L] length.", reqs, 80f, ropeIcon);
             RegisterPrefab(obj, isPiece: true);
         }
 
